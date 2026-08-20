@@ -1,0 +1,14 @@
+package com.example.data.cleanup
+
+enum class CleanupReason {
+    HIGH_EXPOSURE_NO_ENGAGEMENT,
+    REPEATED_SKIP,
+    LOW_USER_RATING,
+    STALE_MEDIA,
+    LOW_TASTE_ALIGNMENT,
+    LARGE_FILE_SIZE,
+    DUPLICATE_CONTENT,
+    FAVORITE_PROTECTED,
+    HIGH_RETENTION,
+    HIGH_TASTE_MATCH
+}

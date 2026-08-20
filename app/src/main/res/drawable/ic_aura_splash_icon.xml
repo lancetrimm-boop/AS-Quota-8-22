@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Padding to ensure the circular logo fits within the splash screen icon mask -->
+    <item
+        android:drawable="@drawable/ic_aura_launcher_source"
+        android:gravity="center"
+        android:width="64dp"
+        android:height="64dp" />
+</layer-list>

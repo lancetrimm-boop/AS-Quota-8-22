@@ -1,0 +1,176 @@
+{
+  "schema_version": "1.0.0",
+  "blueprint_version": "1.0.0",
+  "blueprint_id": "8a3e9c12-7b4d-4e90-8f6a-921c5b8e9f01",
+  "parent_blueprint_id": null,
+  "lifecycle_state": "LOADED",
+  "strategy_blueprint": {
+    "title": "Aura Personalization Engine Strategy",
+    "recommendationNotice": "NO PRODUCTION MODIFICATION RECOMMENDED (0 production evidence samples recorded)",
+    "validationState": "EXPERIMENTALLY_SUPPORTED",
+    "nextExperimentRecommendation": "Conduct controlled experimental trials or A/B testing with synthetic users.",
+    "productionValidationRequirements": [
+      "Minimum of 5 production telemetry samples required for statistical significance."
+    ],
+    "riskAssessment": "MODERATE - Unvalidated in production environment.",
+    "identity": {
+      "blueprintId": "8a3e9c12-7b4d-4e90-8f6a-921c5b8e9f01",
+      "version": "1.0.0",
+      "createdAt": 1753920000000,
+      "parentBlueprintId": null,
+      "trigger": "AURA_EVALUATION_CYCLE",
+      "status": "PROPOSED"
+    },
+    "diagnosis": {
+      "problemStatement": "Pairwise comparison volume is low relative to overall plays.",
+      "beliefDescription": "Calibrating AI skip weight will improve media discovery accuracy.",
+      "affectedComponent": "AISkipEngine",
+      "knownFacts": [
+        "Low pairwise sample ratio"
+      ],
+      "inferences": [
+        "Experimental trial positive trend"
+      ],
+      "hypotheses": [
+        "Current parameters may be sub-optimal for the current user profile segment."
+      ],
+      "diagnosticConfidence": 0.85
+    },
+    "evidence": {
+      "productionEvidence": [],
+      "experimentalEvidence": [
+        "Trial A/B 100 samples"
+      ],
+      "simulationEvidence": [
+        "Monte Carlo 500 samples"
+      ],
+      "productionCount": 0,
+      "experimentalCount": 100,
+      "simulationCount": 500,
+      "provenance": "AuraTelemetryService",
+      "evidenceQuality": 0.82,
+      "knownLimitations": [
+        "Requires live production validation"
+      ]
+    },
+    "baselineState": {
+      "engagementScore": 50.0,
+      "pairwiseWeights": {
+        "pairwiseWeight": 0.35
+      },
+      "aiSkipWeights": {
+        "skipThreshold": 0.25
+      },
+      "tasteDnaWeights": {
+        "vibrancy": 0.2,
+        "aesthetic": 0.2
+      },
+      "explicitRatingWeights": {
+        "like": 0.15,
+        "bookmark": 0.25
+      },
+      "aestheticWeights": {
+        "composition": 0.1,
+        "lighting": 0.1
+      },
+      "recommendationWeights": {
+        "contentSimilarity": 0.4,
+        "collaborative": 0.3
+      },
+      "diversityNoveltyParameters": {
+        "diversity": 0.15,
+        "noveltyDecay": 0.05
+      },
+      "otherStrategyParameters": {
+        "engine": "ClosedLoopEngine"
+      }
+    },
+    "targetState": {
+      "targetMetric": "Personalization Index",
+      "targetValue": 65.0,
+      "desiredBehavioralOutcome": "Increase active user comparisons and preference resolution",
+      "successCriteria": [
+        "Engagement score >= 65"
+      ]
+    },
+    "strategySelection": {
+      "selectedStrategy": "Targeted Skip Calibration",
+      "rationale": "Empirical evidence supports skip weight adjustments.",
+      "alternativesConsidered": [
+        "Randomized recommendations"
+      ],
+      "rejectionReasons": [
+        "Decreases user trust"
+      ]
+    },
+    "proposedModifications": [
+      {
+        "modificationId": "mod-001",
+        "component": "AISkipEngine",
+        "parameter": "skipThreshold",
+        "currentValue": "0.25",
+        "proposedValue": "0.30",
+        "delta": "+0.05",
+        "reason": "Optimize skip detection sensitivity based on trial data",
+        "supportingEvidence": "Experimental trial 100 samples",
+        "expectedEffect": "+15% signal capture",
+        "confidence": 0.8,
+        "modificationType": "EXPERIMENTAL_CHANGE"
+      }
+    ],
+    "tasteDnaModifications": [],
+    "recommendationEngineModifications": [],
+    "executionPlan": {
+      "intendedActions": [
+        {
+          "stepOrder": 1,
+          "action": "Adjust skip threshold in trial environment",
+          "targetComponent": "AISkipEngine",
+          "persistenceRequirements": "Room DB Strategy Log",
+          "isReversible": true
+        }
+      ],
+      "affectedComponents": [
+        "AISkipEngine"
+      ],
+      "executionOrderDescription": "1. Apply experimental shift -> 2. Verify signal",
+      "persistenceRequirements": "Local DB",
+      "isReversible": true
+    },
+    "experimentDesign": {
+      "controlGroupConfig": "Standard skip weights (0.25)",
+      "experimentalGroupConfig": "Calibrated skip weights (0.30)",
+      "sampleRequirements": "100 production samples required",
+      "rollbackCondition": "Drop in engagement score > 5%"
+    },
+    "expectedOutcome": {
+      "expectedImprovement": "+15.0 pts",
+      "timeline": "7 days",
+      "riskLevel": "MODERATE",
+      "riskMitigation": "Automatic rollback if score drops below baseline"
+    },
+    "actualOutcome": {
+      "measuredScore": 60.0,
+      "outcomeClassification": "PARTIALLY_EVALUATED"
+    },
+    "learning": {
+      "keyInsights": [
+        "Experimental skip calibration shows early promise",
+        "Production validation pending"
+      ],
+      "generalizablePatterns": [],
+      "modelAdjustments": [],
+      "futureRecommendations": [
+        "Collect live production feedback"
+      ]
+    },
+    "versionHistory": [
+      {
+        "version": "1.0.0",
+        "timestamp": 1753920000000,
+        "authorOrEngine": "AuraClosedLoopEngine",
+        "notes": "Initial blueprint creation"
+      }
+    ]
+  }
+}

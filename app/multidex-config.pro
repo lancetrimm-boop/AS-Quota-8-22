@@ -1,0 +1,2 @@
+-keep class com.example.MainActivity { <init>(); }
+-keep class com.example.** { *; }
