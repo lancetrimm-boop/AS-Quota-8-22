@@ -586,22 +586,28 @@ class MediaRepository(
             if (query.isBlank()) {
                 emit(sorted)
             } else {
+                // AURA SEARCH FIX: Search against the base pool of ALL eligible library items,
+                // ignoring Intelligent Sort focus filters (like "Unliked Only" in Personalized mode).
+                val basePool = items.filter { item ->
+                    matchesFilterType(item, filter) && isItemVisibleInLibrary(item)
+                }
+
                 val engine = hybridSearchEngine
                 if (engine != null) {
                     val result = engine.search(query)
-                    if (result.isSuccess) {
+                    val hybridResults = if (result.isSuccess && result.candidates.isNotEmpty()) {
                         val itemsMap = items.associateBy { it.id }
-                        val hybridResults = result.candidates.mapNotNull { itemsMap[it.mediaId] }
-                        
-                        // AURA P1 STABILITY: Consistency filtering
-                        // Ensure we only return items that are eligible for the current view (modality/deleted status)
-                        val eligibleIds = sorted.map { it.id }.toSet()
-                        emit(hybridResults.filter { it.id in eligibleIds })
+                        result.candidates.mapNotNull { itemsMap[it.mediaId] }
                     } else {
-                        emit(performLegacySearch(sorted, query))
+                        // Fallback to legacy search if hybrid engine fails OR returns zero matches
+                        performLegacySearch(basePool, query)
                     }
+                    
+                    // AURA P1 STABILITY: Consistency filtering against the base pool
+                    val eligibleIds = basePool.map { it.id }.toSet()
+                    emit(hybridResults.filter { it.id in eligibleIds })
                 } else {
-                    emit(performLegacySearch(sorted, query))
+                    emit(performLegacySearch(basePool, query))
                 }
             }
         }
@@ -3476,25 +3482,7 @@ stats ->
         creatorProfiles: Map<String, CreatorProfile> = _creatorProfiles.value
     ): List<MediaItem> {
         val items = inputItems.filter { item ->
-            val matchesType = when (filterType.uppercase()) {
-                "PHOTO" -> item.mediaType.uppercase() in listOf("PHOTO", "IMAGE")
-                "VIDEO" -> item.mediaType.uppercase() in listOf("VIDEO", "MOVIE")
-                else -> true
-            }
-
-            // AURA P1 STABILITY: Authoritative Visibility Gate
-            // Only verified playable terminal states are allowed in the Library Flow.
-            // ANALYSIS_PENDING and UNTESTED are strictly hidden to prevent grid shimmer and unplayable items.
-            val visibleStatuses = listOf(
-                CompatibilityStatus.PLAYABLE,
-                CompatibilityStatus.PLAYABLE_SOFTWARE_DECODE,
-                CompatibilityStatus.PLAYABLE_AFTER_CONVERSION,
-                CompatibilityStatus.THUMBNAIL_FAILED,
-                CompatibilityStatus.NEEDS_TRANSCODE
-            )
-            val isVisible = !item.isDeleted && item.compatibilityStatus in visibleStatuses
-
-            matchesType && isVisible
+            matchesFilterType(item, filterType) && isItemVisibleInLibrary(item)
         }
 
         return if (sortCategory == SortCategory.STANDARD) {
@@ -3786,6 +3774,27 @@ stats ->
     private suspend fun deleteSemanticDataForMedia(mediaId: String) {
         semanticRepresentationRepository?.deleteForMedia(mediaId)
         semanticCandidateRetriever?.onMediaRemoved(mediaId)
+    }
+
+    private fun matchesFilterType(item: MediaItem, filterType: String): Boolean {
+        return when (filterType.uppercase()) {
+            "PHOTO" -> item.mediaType.uppercase() in listOf("PHOTO", "IMAGE")
+            "VIDEO" -> item.mediaType.uppercase() in listOf("VIDEO", "MOVIE")
+            else -> true
+        }
+    }
+
+    private fun isItemVisibleInLibrary(item: MediaItem): Boolean {
+        // AURA P1 STABILITY: Authoritative Visibility Gate
+        // Only verified playable terminal states are allowed in the Library Flow.
+        val visibleStatuses = listOf(
+            CompatibilityStatus.PLAYABLE,
+            CompatibilityStatus.PLAYABLE_SOFTWARE_DECODE,
+            CompatibilityStatus.PLAYABLE_AFTER_CONVERSION,
+            CompatibilityStatus.THUMBNAIL_FAILED,
+            CompatibilityStatus.NEEDS_TRANSCODE
+        )
+        return !item.isDeleted && item.compatibilityStatus in visibleStatuses
     }
 
     private fun performLegacySearch(items: List<MediaItem>, query: String): List<MediaItem> {

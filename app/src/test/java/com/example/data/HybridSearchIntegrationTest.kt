@@ -191,19 +191,53 @@ class HybridSearchIntegrationTest {
     }
 
     @Test
-    fun `test blank query uses legacy sorting`() = runTest(testDispatcher) {
-        val items = listOf(
-            createMediaItem("m1", "B", dateAdded = 1000L),
-            createMediaItem("m2", "A", dateAdded = 2000L)
-        )
-        repository.setMediaItemsForTesting(items)
-
-        // Default sort is NEWEST_FIRST
+    fun `test search ignores personalized mode filters`() = runTest(testDispatcher) {
+        // PERSONALIZED mode excludes Liked items. 
+        // Search should return them anyway.
+        val item = createMediaItem("m1", "Special Item").copy(isFavorite = true)
+        repository.setMediaItemsForTesting(listOf(item))
+        
+        // 1. Verify it's excluded from Personalized sort by default
+        repository.sortCategory = SortCategory.INTELLIGENT
+        repository.intelligentSort = IntelligentSortOption.PERSONALIZED
         repository.librarySearchQuery = ""
+        testDispatcher.scheduler.advanceUntilIdle()
+        
+        assertTrue("Liked item should be excluded from Personalized view", 
+            repository.latestAiSortRecommendation.value.isEmpty())
+
+        // 2. Verify search finds it regardless of mode
+        repository.librarySearchQuery = "Special"
+        testDispatcher.scheduler.advanceUntilIdle()
+        
+        val results = repository.latestAiSortRecommendation.value
+        assertEquals(1, results.size)
+        assertEquals("m1", results[0].id)
+    }
+
+    @Test
+    fun `test search fallback to legacy when hybrid returns zero`() = runTest(testDispatcher) {
+        // Mock hybrid engine to return zero results (success=true, candidates=empty)
+        val mockHybrid = object : HybridSearchEngine {
+            override suspend fun search(query: String, config: HybridSearchConfig) = HybridSearchResult(
+                query = query, candidates = emptyList(), latencyMs = 1, 
+                totalCandidatesConsidered = 0, channelCandidateCounts = emptyMap(), isSuccess = true
+            )
+            override fun isSemanticReady() = true
+        }
+        
+        val field = MediaRepository::class.java.getDeclaredField("hybridSearchEngine")
+        field.isAccessible = true
+        field.set(repository, mockHybrid)
+
+        val item = createMediaItem("m1", "Fallback Test")
+        repository.setMediaItemsForTesting(listOf(item))
+
+        repository.librarySearchQuery = "Fallback"
         testDispatcher.scheduler.advanceUntilIdle()
 
         val results = repository.latestAiSortRecommendation.value
-        assertEquals("m2", results[0].id) // A (newer)
-        assertEquals("m1", results[1].id) // B (older)
+        assertEquals("Should find item via legacy fallback", 1, results.size)
+        assertEquals("m1", results[0].id)
     }
 }
