@@ -576,9 +576,11 @@ private fun CompactControlsRow(
                 label = "Intelligence",
                 currentOption = when (intelligentSort) {
                     IntelligentSortOption.PERSONALIZED -> "Personalized"
+                    IntelligentSortOption.DISCOVER -> "Discover"
                     IntelligentSortOption.REDISCOVER -> "Rediscover"
-                    IntelligentSortOption.LEAST_INTERACTED -> "Unseen"
-                    IntelligentSortOption.EXPLORE -> "Experimental"
+                    IntelligentSortOption.HIDDEN_GEMS -> "Hidden Gems"
+                    IntelligentSortOption.FAVORITES -> "Favorites"
+                    IntelligentSortOption.SURPRISE_ME -> "Surprise Me"
                 },
                 isSelected = false,
                 options = IntelligentSortOption.entries,

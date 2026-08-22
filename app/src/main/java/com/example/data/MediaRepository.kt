@@ -217,33 +217,43 @@ class MediaRepository(
     var blueprintArtifactManager: com.example.data.blueprint.BlueprintArtifactManager? = null
         private set
 
+    @Volatile
     var intelligenceRepository: IntelligenceRepository? = null
         private set
 
+    @Volatile
     var playbackErrorLogRepository: PlaybackErrorLogRepository? = null
         private set
 
+    @Volatile
     var contributionQueueRepository: ContributionQueueRepository? = null
         private set
 
+    @Volatile
     var conversionQueueRepository: ConversionQueueRepository? = null
         private set
 
+    @Volatile
     var semanticRepresentationRepository: SemanticRepresentationRepository? = null
         private set
 
+    @Volatile
     var embeddingProvider: EmbeddingProvider? = null
         private set
 
+    @Volatile
     var mobileCLIPProvider: MobileCLIPEmbeddingProvider? = null
         private set
 
+    @Volatile
     var semanticCandidateRetriever: SemanticCandidateRetriever? = null
         private set
 
+    @Volatile
     var semanticSearchService: SemanticSearchService? = null
         private set
 
+    @Volatile
     var hybridSearchEngine: HybridSearchEngine? = null
         private set
 
@@ -568,6 +578,8 @@ class MediaRepository(
             @Suppress("UNCHECKED_CAST")
             val creators = args[12] as Map<String, CreatorProfile>
 
+            Log.d("AURA_SORT_DIAG", "latestSortedFullItemsFlow triggered. Category: $category, IntelligentSort: $intelligentSort")
+
             val sorted = getFilteredAndSortedMedia(
                 filterType = filter,
                 sortCategory = category,
@@ -583,7 +595,10 @@ class MediaRepository(
                 creatorProfiles = creators
             )
             
+            Log.d("AURA_SEARCH_DEBUG", "Flow recomputing. Query: '$query', Items: ${items.size}, Category: $category, IntSort: $intelligentSort")
+
             if (query.isBlank()) {
+                Log.d("AURA_SEARCH_DEBUG", "Query blank, emitting sorted list of ${sorted.size} items")
                 emit(sorted)
             } else {
                 // AURA SEARCH FIX: Search against the base pool of ALL eligible library items,
@@ -591,23 +606,31 @@ class MediaRepository(
                 val basePool = items.filter { item ->
                     matchesFilterType(item, filter) && isItemVisibleInLibrary(item)
                 }
+                Log.d("AURA_SEARCH_DEBUG", "Searching. Base pool: ${basePool.size} items")
 
                 val engine = hybridSearchEngine
                 if (engine != null) {
                     val result = engine.search(query)
+                    Log.d("AURA_SEARCH_DEBUG", "Hybrid result: success=${result.isSuccess}, candidates=${result.candidates.size}")
                     val hybridResults = if (result.isSuccess && result.candidates.isNotEmpty()) {
                         val itemsMap = items.associateBy { it.id }
                         result.candidates.mapNotNull { itemsMap[it.mediaId] }
                     } else {
                         // Fallback to legacy search if hybrid engine fails OR returns zero matches
-                        performLegacySearch(basePool, query)
+                        val legacy = performLegacySearch(basePool, query)
+                        Log.d("AURA_SEARCH_DEBUG", "Hybrid failed or empty. Legacy results: ${legacy.size}")
+                        legacy
                     }
                     
                     // AURA P1 STABILITY: Consistency filtering against the base pool
                     val eligibleIds = basePool.map { it.id }.toSet()
-                    emit(hybridResults.filter { it.id in eligibleIds })
+                    val finalResults = hybridResults.filter { it.id in eligibleIds }
+                    Log.d("AURA_SEARCH_DEBUG", "Emitting ${finalResults.size} search results")
+                    emit(finalResults)
                 } else {
-                    emit(performLegacySearch(basePool, query))
+                    val legacy = performLegacySearch(basePool, query)
+                    Log.d("AURA_SEARCH_DEBUG", "Engine null. Legacy results: ${legacy.size}")
+                    emit(legacy)
                 }
             }
         }
@@ -618,16 +641,16 @@ class MediaRepository(
     /**
      * LATEST AVAILABLE AI SORT RECOMMENDATION (Reactive UI Model)
      * Optimized to emit lightweight UI models on a background thread.
-     * distinctUntilChanged() ensures that metadata updates (like exposureCount)
-     * that don't change the UI representation do not trigger UI list updates.
+     * Mode-aware identity ensures UI refreshes even if top results are similar.
      */
-    val latestAiSortRecommendation: StateFlow<List<LibraryItemUi>> = latestSortedFullItemsFlow
-        .map { fullItems: List<MediaItem> -> 
-            fullItems.map { it.toLibraryItemUi() } 
-        }
-        .distinctUntilChanged()
-        .flowOn(kotlinx.coroutines.Dispatchers.Default)
-        .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val latestAiSortRecommendation: StateFlow<List<LibraryItemUi>> = combine(
+        latestSortedFullItemsFlow,
+        _selectedIntelligentSort
+    ) { items, _ -> 
+        items.map { it.toLibraryItemUi() } 
+    }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private fun MediaItem.toLibraryItemUi(): LibraryItemUi {
         return LibraryItemUi(
@@ -823,8 +846,20 @@ class MediaRepository(
                         Log.e("MediaRepository", "Failed to load MobileCLIP model from assets.", e)
                     }
 
+                    // AURA STABILITY: Ensure all mandatory repositories are initialized before marking READY
+                    checkNotNull(intelligenceRepository) { "intelligenceRepository failed to initialize" }
+                    checkNotNull(playbackErrorLogRepository) { "playbackErrorLogRepository failed to initialize" }
+                    checkNotNull(conversionQueueRepository) { "conversionQueueRepository failed to initialize" }
+                    checkNotNull(semanticRepresentationRepository) { "semanticRepresentationRepository failed to initialize" }
+                    checkNotNull(hybridSearchEngine) { "hybridSearchEngine failed to initialize" }
+
                     _databaseState.value = DatabaseState.READY
                     
+                    // AURA SEARCH FIX: Backfill semantics for existing media items
+                    launch {
+                        backfillSemantics()
+                    }
+
                     // Cleanup legacy backups if transition was stable
                     LegacyDatabaseEncryptionMigrator.cleanupLegacyBackups(context)
 
@@ -972,10 +1007,15 @@ class MediaRepository(
                             try { _selectedStandardSort.value = StandardSortOption.valueOf(name) } catch (e: Exception) {}
                         }
                         db.userPreferenceDao().getPreference("selected_intelligent_sort")?.value?.let { name ->
+                            val migratedName = when (name) {
+                                "EXPLORE", "LEAST_INTERACTED" -> "DISCOVER"
+                                "BEST_MATCH" -> "PERSONALIZED"
+                                else -> name
+                            }
                             try { 
-                                _selectedIntelligentSort.value = IntelligentSortOption.valueOf(name) 
+                                _selectedIntelligentSort.value = IntelligentSortOption.valueOf(migratedName) 
                             } catch (e: Exception) {
-                                // Fallback for obsolete sort options
+                                // Fallback for other obsolete sort options
                                 _selectedIntelligentSort.value = IntelligentSortOption.PERSONALIZED
                             }
                         }
@@ -2983,9 +3023,33 @@ class MediaRepository(
         }
     }
 
-    fun getSimilarMedia(item: MediaItem): List<MediaItem> {
+    suspend fun getSimilarMedia(item: MediaItem): List<MediaItem> {
         val all = _mediaItems.value.filter { it.id != item.id }
         if (all.isEmpty()) return emptyList()
+
+        // 1. Semantic Integration (Phase 13 Improvement)
+        // Retrieve embeddings for the reference item
+        val repo = semanticRepresentationRepository
+        val retriever = semanticCandidateRetriever
+        val semanticCandidates = mutableMapOf<String, Float>() // mediaId -> score
+        
+        if (repo != null && retriever != null) {
+            val reps = repo.getForMedia(item.id)
+            // Prioritize Visual context if available, fallback to Content
+            val refRep = reps.find { it.type == com.example.data.semantic.SemanticRepresentationType.VISUAL }
+                ?: reps.find { it.type == com.example.data.semantic.SemanticRepresentationType.CONTENT }
+                
+            if (refRep != null) {
+                val results = retriever.retrieveCandidates(
+                    queryVector = refRep.vector,
+                    type = refRep.type,
+                    descriptor = refRep.modelDescriptor,
+                    topK = 50,
+                    minSimilarity = 0.5f // Reasonable threshold for "similar"
+                )
+                results.forEach { semanticCandidates[it.mediaId] = it.similarityScore }
+            }
+        }
 
         val itemTags = item.moodTags.filter { it.isNotBlank() }.map { it.lowercase().trim() }.toSet()
         val itemGenre = item.genre.lowercase().trim()
@@ -3001,24 +3065,29 @@ class MediaRepository(
         val scored = all.mapNotNull { other ->
             var contentScore = 0
 
-            // 1. Mood Tags matching (+12 per matching tag)
+            // 1. Semantic Boost (+25 for high similarity)
+            val semanticScore = semanticCandidates[other.id] ?: 0f
+            if (semanticScore > 0.8f) contentScore += 25
+            else if (semanticScore > 0.6f) contentScore += 15
+
+            // 2. Mood Tags matching (+12 per matching tag)
             val otherTags = other.moodTags.filter { it.isNotBlank() }.map { it.lowercase().trim() }.toSet()
             val commonTags = itemTags.intersect(otherTags).size
             contentScore += commonTags * 12
 
-            // 2. Genre matching (+10 for matching genre, excluding generic "media")
+            // 3. Genre matching (+10 for matching genre, excluding generic "media")
             val otherGenre = other.genre.lowercase().trim()
             if (itemGenre.isNotEmpty() && itemGenre != "media" && itemGenre == otherGenre) {
                 contentScore += 10
             }
 
-            // 3. Category matching (+8 for matching category, excluding generic "for you")
+            // 4. Category matching (+8 for matching category, excluding generic "for you")
             val otherCategory = other.category.lowercase().trim()
             if (itemCategory.isNotEmpty() && itemCategory != "for you" && itemCategory == otherCategory) {
                 contentScore += 8
             }
 
-            // 4. Title / Filename token overlap (+6 per matching token)
+            // 5. Title / Filename token overlap (+6 per matching token)
             val otherTitleTokens = other.title.lowercase()
                 .split(Regex("[^a-z0-9]+"))
                 .filter { it.length >= 3 && !stopWords.contains(it) }
@@ -3542,31 +3611,7 @@ stats ->
                     }.sortedByDescending { it.second }.map { it.first }
                 }
 
-                IntelligentSortOption.REDISCOVER -> {
-                    items.filter { item ->
-                        val isLiked = item.isFavorite || item.rating >= 4.0f
-                        val isRecent = item.lastViewedTimestamp?.let { now - it < recentThreshold } ?: false
-                        isLiked && !isRecent
-                    }.map { item ->
-                        val ageBonus = if (item.lastViewedTimestamp != null) {
-                            (now - item.lastViewedTimestamp!!).toDouble() / (1000.0 * 60 * 60 * 24 * 7) // weeks
-                        } else 100.0 // Should not happen for Liked items usually, but fallback
-                        
-                        val score = (item.rating.toDouble() * 20.0) + (item.viewCount.toDouble() * 2.0) + ageBonus
-                        item.copy(selectionReason = "Blast from the Past") to score
-                    }.sortedByDescending { it.second }.map { it.first }
-                }
-
-                IntelligentSortOption.LEAST_INTERACTED -> {
-                    items.sortedWith(
-                        compareBy<MediaItem> { it.exposureCount }
-                            .thenBy { if (it.viewCount == 0) 0 else 1 }
-                            .thenBy { if (it.rating == 0f) 0 else 1 }
-                            .thenBy { it.viewCount }
-                    ).map { it.copy(selectionReason = "Needs Attention") }
-                }
-
-                IntelligentSortOption.EXPLORE -> {
+                IntelligentSortOption.DISCOVER -> {
                     val strategy = DiscoveryPolicyManager.resolveStrategy(
                         policy = policy,
                         intent = intent,
@@ -3583,6 +3628,57 @@ stats ->
                         val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
                         item.copy(selectionReason = "New Discovery") to score
                     }.sortedByDescending { it.second }.map { it.first }
+                }
+
+                IntelligentSortOption.REDISCOVER -> {
+                    items.filter { item ->
+                        val isLiked = item.isFavorite || item.rating >= 4.0f
+                        val isRecent = item.lastViewedTimestamp?.let { now - it < recentThreshold } ?: false
+                        isLiked && !isRecent
+                    }.map { item ->
+                        val ageBonus = if (item.lastViewedTimestamp != null) {
+                            (now - item.lastViewedTimestamp!!).toDouble() / (1000.0 * 60 * 60 * 24 * 7) // weeks
+                        } else 100.0 // Should not happen for Liked items usually, but fallback
+                        
+                        val score = (item.rating.toDouble() * 20.0) + (item.viewCount.toDouble() * 2.0) + ageBonus
+                        item.copy(selectionReason = "Blast from the Past") to score
+                    }.sortedByDescending { it.second }.map { it.first }
+                }
+
+                IntelligentSortOption.HIDDEN_GEMS -> {
+                    val strategy = DiscoveryPolicyManager.resolveStrategy(
+                        policy = policy,
+                        intent = intent,
+                        objective = RecommendationObjective.LIBRARY_INTELLIGENT_DISCOVERY,
+                        systemState = ConfidenceEngine.calculateDiscoveryState(inputItems, stats),
+                        tasteDNA = tasteDNA,
+                        profile = profile
+                    )
+                    
+                    items.filter { item ->
+                        item.exposureCount < 5 && item.viewCount < 2 && item.rating == 0f
+                    }.map { item ->
+                        val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creatorProfiles, now)
+                        val score = ExplorationEngine.calculatePolicyScore(evidence, strategy)
+                        item.copy(selectionReason = "Hidden Gem") to score
+                    }.sortedByDescending { it.second }.map { it.first }
+                }
+
+                IntelligentSortOption.FAVORITES -> {
+                    items.filter { item ->
+                        item.isFavorite || item.rating >= 4.0f
+                    }.map { item ->
+                        val evidence = ExplorationEngine.calculateEvidence(item, tasteDNA, stats, creatorProfiles, now)
+                        // Favorites are already high quality, sort by newest added
+                        val score = evidence.exploitationScore * 10f + (item.dateAdded.toDouble() / 1e12).toFloat()
+                        item.copy(selectionReason = "Your Favorite") to score
+                    }.sortedByDescending { it.second }.map { it.first }
+                }
+
+                IntelligentSortOption.SURPRISE_ME -> {
+                    items.sortedBy { item ->
+                        (item.id + sessionSeed).hashCode()
+                    }.map { it.copy(selectionReason = "Surprise!") }
                 }
             }
         }
@@ -3728,6 +3824,26 @@ stats ->
         }
 
         return result
+    }
+
+    private suspend fun backfillSemantics() {
+        val db = database ?: return
+        val repo = semanticRepresentationRepository ?: return
+        val allEntities = db.mediaDao().getAllMediaSync()
+        
+        val toBackfill = allEntities.filter { entity ->
+            // Only backfill items that are already processed but missing embeddings
+            val isProcessed = entity.compatibilityStatus == CompatibilityStatus.PLAYABLE.name
+            if (!isProcessed) return@filter false
+            
+            val representations = repo.getForMedia(entity.id)
+            representations.isEmpty()
+        }
+
+        if (toBackfill.isNotEmpty()) {
+            Log.i("MediaRepository", "Backfilling semantics for ${toBackfill.size} items.")
+            processSemanticsForBatch(toBackfill)
+        }
     }
 
     private suspend fun processSemanticsForBatch(entities: List<MediaEntity>) {
@@ -3962,7 +4078,9 @@ enum class StandardSortOption(val displayName: String, val description: String) 
 
 enum class IntelligentSortOption(val displayName: String, val description: String) {
     PERSONALIZED("Personalized", "AI thinks these are your best choices."),
-    REDISCOVER("Rediscover", "Items the user likes, but hasn't seen in a relatively long time."),
-    LEAST_INTERACTED("Least Interacted", "Items the user has the least interaction with."),
-    EXPLORE("Explore", "AI thinks the user will like it, and the user has had little or no interaction with it.")
+    DISCOVER("Discover", "New content you haven't explored yet."),
+    REDISCOVER("Rediscover", "Enjoy your favorites and past gems again."),
+    HIDDEN_GEMS("Hidden Gems", "High quality items you might have missed."),
+    FAVORITES("Favorites", "Everything you've liked and rated highly."),
+    SURPRISE_ME("Surprise Me", "A fresh random selection from your library.")
 }

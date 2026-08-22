@@ -58,10 +58,11 @@ class OnnxRuntimeMobileCLIPInferenceEngine(
                 session = env.createSession(modelPath)
                 Log.i("MobileCLIPInference", "ONNX Session initialized from path: $modelPath")
             } else {
-                Log.e("MobileCLIPInference", "No model artifact provided.")
+                throw IllegalArgumentException("No model artifact provided.")
             }
         } catch (e: Exception) {
             Log.e("MobileCLIPInference", "Failed to initialize ONNX session", e)
+            throw e
         }
     }
 

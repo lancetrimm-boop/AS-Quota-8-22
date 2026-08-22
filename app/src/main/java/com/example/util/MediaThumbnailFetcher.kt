@@ -21,7 +21,7 @@ object MediaThumbnailFetcher {
     private const val TAG = "MediaThumbnailFetcher"
     private const val THUMBNAIL_DIR = "thumbnails"
     private const val MAX_CONCURRENT_EXTRACTIONS = 4
-    private const val TARGET_THUMBNAIL_SIZE = 512
+    private const val TARGET_THUMBNAIL_SIZE = 320
 
     private val maxMemory = (Runtime.getRuntime().maxMemory() / 1024).toInt()
     private val cacheSize = maxMemory / 8

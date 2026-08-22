@@ -77,7 +77,7 @@ class AuraLibrarySortingTest {
     }
 
     @Test
-    fun testIntelligentSort_LeastInteracted() {
+    fun testIntelligentSort_Discover() {
         val items = listOf(
             createItem("1", "High Exposure", viewCount = 10, exposureCount = 20),
             createItem("2", "Low Exposure", viewCount = 1, exposureCount = 2),
@@ -85,7 +85,7 @@ class AuraLibrarySortingTest {
         )
 
         val sorted = repository.getFilteredAndSortedMedia(
-            "ALL", SortCategory.INTELLIGENT, StandardSortOption.NEWEST_FIRST, IntelligentSortOption.LEAST_INTERACTED, inputItems = items
+            "ALL", SortCategory.INTELLIGENT, StandardSortOption.NEWEST_FIRST, IntelligentSortOption.DISCOVER, inputItems = items
         )
         assertEquals("3", sorted[0].id)
         assertEquals("2", sorted[1].id)

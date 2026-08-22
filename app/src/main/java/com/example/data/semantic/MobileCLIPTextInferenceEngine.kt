@@ -48,9 +48,12 @@ class OnnxRuntimeMobileCLIPTextInferenceEngine(
                 session = env.createSession(modelBytes)
             } else if (modelPath != null) {
                 session = env.createSession(modelPath)
+            } else {
+                throw IllegalArgumentException("No model artifact provided to OnnxRuntimeMobileCLIPTextInferenceEngine.")
             }
         } catch (e: Exception) {
-            // Log.e ignored for JVM tests
+            android.util.Log.e("MobileCLIPTextInference", "Failed to initialize ONNX session", e)
+            throw e
         }
     }
 

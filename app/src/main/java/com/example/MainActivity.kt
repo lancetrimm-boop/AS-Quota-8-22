@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.DatabaseState
@@ -77,6 +78,36 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AuraApp(repository: MediaRepository) {
+    val databaseState by repository.databaseState.collectAsStateWithLifecycle()
+
+    when (databaseState) {
+        DatabaseState.READY -> {
+            AuraMainContent(repository = repository)
+        }
+        DatabaseState.INITIALIZING, DatabaseState.VERIFYING, DatabaseState.TRANSITIONING, DatabaseState.TRANSITION_REQUIRED -> {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = AuraPurple)
+            }
+        }
+        DatabaseState.TRANSITION_FAILED, DatabaseState.CORRUPTED, DatabaseState.ENCRYPTION_FAILED -> {
+            Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "Database Error: ${databaseState.name}\nPlease restart the app or contact support.",
+                    color = AuraMidnight,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+        DatabaseState.NOT_INITIALIZED -> {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = AuraPurple)
+            }
+        }
+    }
+}
+
+@Composable
+fun AuraMainContent(repository: MediaRepository) {
     val discoverViewModel: com.example.ui.screens.DiscoverViewModel = viewModel(
         factory = object : androidx.lifecycle.ViewModelProvider.Factory {
             override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
@@ -104,8 +135,10 @@ fun AuraApp(repository: MediaRepository) {
     val playbackDiagnosticsViewModel: com.example.ui.screens.PlaybackDiagnosticsViewModel = viewModel(
         factory = object : androidx.lifecycle.ViewModelProvider.Factory {
             override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                val errorLogRepo = repository.playbackErrorLogRepository
+                    ?: throw IllegalStateException("PlaybackErrorLogRepository not initialized in READY state")
                 return com.example.ui.screens.PlaybackDiagnosticsViewModel(
-                    repository.playbackErrorLogRepository!!,
+                    errorLogRepo,
                     repository.conversionQueueRepository
                 ) as T
             }
@@ -351,12 +384,14 @@ fun AuraApp(repository: MediaRepository) {
                     },
                     onMicroMoment = { id, taps -> repository.recordMicroMoment(id, taps) },
                     onSeeSimilar = { targetItem ->
-                        val similar = repository.getSimilarMedia(targetItem)
-                        if (similar.isNotEmpty()) {
-                            repository.setPlaylist(items = similar, initialIndex = 0, sourceTitle = "See Similar — ${targetItem.title}")
-                            android.widget.Toast.makeText(context, "Loaded ${similar.size} similar items", android.widget.Toast.LENGTH_SHORT).show()
-                        } else {
-                            android.widget.Toast.makeText(context, "No similar media found", android.widget.Toast.LENGTH_SHORT).show()
+                        coroutineScope.launch {
+                            val similar = repository.getSimilarMedia(targetItem)
+                            if (similar.isNotEmpty()) {
+                                repository.setPlaylist(items = similar, initialIndex = 0, sourceTitle = "See Similar — ${targetItem.title}")
+                                android.widget.Toast.makeText(context, "Loaded ${similar.size} similar items", android.widget.Toast.LENGTH_SHORT).show()
+                            } else {
+                                android.widget.Toast.makeText(context, "No similar media found", android.widget.Toast.LENGTH_SHORT).show()
+                            }
                         }
                     },
                     onAISkipEvent = { mediaId, eventType, fromPos, toPos ->

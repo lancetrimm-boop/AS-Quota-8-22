@@ -135,8 +135,16 @@ fun AuraMediaThumbnail(
                     .graphicsLayer(alpha = 0.5f)
 
                 if (thumbnailBitmap != null) {
+                    // MEMORY OPTIMIZATION: Create a tiny bitmap for the blur layer to avoid processing full resolution
+                    val tinyBitmap = remember(thumbnailBitmap) {
+                        try {
+                            Bitmap.createScaledBitmap(thumbnailBitmap!!, 100, 100, true)
+                        } catch (e: Exception) {
+                            thumbnailBitmap
+                        }
+                    }
                     Image(
-                        bitmap = thumbnailBitmap!!.asImageBitmap(),
+                        bitmap = tinyBitmap!!.asImageBitmap(),
                         contentDescription = null,
                         modifier = backgroundModifier,
                         contentScale = ContentScale.Crop
@@ -260,6 +268,25 @@ fun LibraryGalleryMediaTile(
                         .padding(8.dp)
                         .size(20.dp)
                 )
+            }
+
+            // Vibe label / Selection Reason (Phase 13 Improvement)
+            if (item.selectionReason != null) {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp),
+                    color = DiscoveryViolet.copy(alpha = 0.85f),
+                    shape = RoundedCornerShape(4.dp)
+                ) {
+                    Text(
+                        text = item.selectionReason.uppercase(),
+                        color = Color.White,
+                        fontSize = 8.sp,
+                        fontWeight = FontWeight.Black,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
             }
 
             // Duration Badge for Videos (Retained)
@@ -643,7 +670,7 @@ fun AuraContinueWatchingCard(
 }
 
 object VideoPreviewPool {
-    private const val MAX_ACTIVE_PREVIEWS = 6
+    private const val MAX_ACTIVE_PREVIEWS = 3
     
     // Key is "itemId_locationTag" to prevent player stealing between different UI contexts
     private val activePlayers = mutableMapOf<String, ExoPlayer>()

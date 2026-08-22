@@ -2,6 +2,7 @@ package com.example
 
 import com.example.data.MediaItem
 import com.example.data.MediaRepository
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -18,7 +19,7 @@ class SeeSimilarTest {
     }
 
     @Test
-    fun testReferenceItemIsExcludedFromResults() {
+    fun testReferenceItemIsExcludedFromResults() = runTest {
         val refItem = MediaItem(
             id = "ref_1",
             title = "Cinematic Sunset",
@@ -44,7 +45,7 @@ class SeeSimilarTest {
     }
 
     @Test
-    fun testResultsAreBoundedWhenLibraryIsLarge() {
+    fun testResultsAreBoundedWhenLibraryIsLarge() = runTest {
         val refItem = MediaItem(
             id = "ref_10",
             title = "Nature Documentary",
@@ -76,7 +77,7 @@ class SeeSimilarTest {
     }
 
     @Test
-    fun testCandidatesAreRankedBySimilarity() {
+    fun testCandidatesAreRankedBySimilarity() = runTest {
         val refItem = MediaItem(
             id = "ref_hero",
             title = "Cyberpunk Action Game",
@@ -115,7 +116,7 @@ class SeeSimilarTest {
     }
 
     @Test
-    fun testDifferentReferenceItemsProduceDifferentCandidateSets() {
+    fun testDifferentReferenceItemsProduceDifferentCandidateSets() = runTest {
         val refNature = MediaItem(
             id = "ref_nature",
             title = "Deep Ocean Wonders",
@@ -162,7 +163,7 @@ class SeeSimilarTest {
     }
 
     @Test
-    fun testHighlyRatedUnrelatedItemDoesNotOutrankSimilarLowerRatedItem() {
+    fun testHighlyRatedUnrelatedItemDoesNotOutrankSimilarLowerRatedItem() = runTest {
         val refItem = MediaItem(
             id = "ref_scifi",
             title = "Sci-Fi Space Odyssey",
@@ -201,7 +202,7 @@ class SeeSimilarTest {
     }
 
     @Test
-    fun testFavoritedUnrelatedItemDoesNotReceiveSimilarityAdvantage() {
+    fun testFavoritedUnrelatedItemDoesNotReceiveSimilarityAdvantage() = runTest {
         val refItem = MediaItem(
             id = "ref_1",
             title = "Jazz Performance",
@@ -240,7 +241,7 @@ class SeeSimilarTest {
     }
 
     @Test
-    fun testEquivalentSimilarityScoresDoNotUseRatingAsTieBreaker() {
+    fun testEquivalentSimilarityScoresDoNotUseRatingAsTieBreaker() = runTest {
         val refItem = MediaItem(
             id = "ref_1",
             title = "Forest Walk",
@@ -282,7 +283,7 @@ class SeeSimilarTest {
     }
 
     @Test
-    fun testMatchingReferenceMetadataIncreasesSimilarity() {
+    fun testMatchingReferenceMetadataIncreasesSimilarity() = runTest {
         val refItem = MediaItem(
             id = "ref_1",
             title = "Cyberpunk Neo Tokyo",
@@ -318,7 +319,7 @@ class SeeSimilarTest {
     }
 
     @Test
-    fun testQualityThresholdExcludesWeakMatches() {
+    fun testQualityThresholdExcludesWeakMatches() = runTest {
         val refItem = MediaItem(
             id = "ref_1",
             title = "Sunset at the Lake",
@@ -342,7 +343,7 @@ class SeeSimilarTest {
     }
 
     @Test
-    fun testNoFallbackWhenNoMatchesFound() {
+    fun testNoFallbackWhenNoMatchesFound() = runTest {
         val refItem = MediaItem(
             id = "ref_photo",
             title = "Unique Abstract Pattern",
@@ -365,7 +366,7 @@ class SeeSimilarTest {
     }
 
     @Test
-    fun testReturnBetweenTenAndThirtyWhenGenuinelySimilar() {
+    fun testReturnBetweenTenAndThirtyWhenGenuinelySimilar() = runTest {
         val refItem = MediaItem(id = "ref", title = "Title", genre = "Nature", mediaType = "VIDEO")
         
         // 15 genuinely similar items (same genre + same media type -> score 12)
@@ -380,7 +381,7 @@ class SeeSimilarTest {
     }
 
     @Test
-    fun testSeeSimilarIsolatedFromRecommendationEngine() {
+    fun testSeeSimilarIsolatedFromRecommendationEngine() = runTest {
         val refItem = MediaItem(
             id = "ref_1",
             title = "Classical Piano Sonata",

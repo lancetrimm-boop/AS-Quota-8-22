@@ -91,7 +91,7 @@ class IntelligentSortBehaviorTest {
     }
 
     @Test
-    fun testExploreRequirement() = runTest {
+    fun testDiscoverRequirement() = runTest {
         val seenItem = createMediaItem("seen", viewCount = 5, exposureCount = 10)
         val unseenItem = createMediaItem("unseen", viewCount = 0, exposureCount = 0)
         val lowInteractionItem = createMediaItem("low", viewCount = 1, exposureCount = 2)
@@ -103,7 +103,7 @@ class IntelligentSortBehaviorTest {
             filterType = "ALL",
             sortCategory = SortCategory.INTELLIGENT,
             standardSort = StandardSortOption.NEWEST_FIRST,
-            intelligentSort = IntelligentSortOption.EXPLORE
+            intelligentSort = IntelligentSortOption.DISCOVER
         )
         
         assertEquals(2, sorted.size)

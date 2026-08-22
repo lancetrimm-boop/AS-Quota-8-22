@@ -83,25 +83,77 @@ class LibraryDiscoveryTest {
     }
 
     @Test
-    fun testLibrary_LeastInteractedSort_FollowsPriority() {
+    fun testLibrary_FavoritesSort_IncludesLikedAndHighRated() {
         val repo = MediaRepository()
-        
-        val itemA = unseenItem.copy(id = "A", exposureCount = 0, viewCount = 0, rating = 0f)
-        val itemB = unseenItem.copy(id = "B", exposureCount = 5, viewCount = 0, rating = 0f)
-        val itemC = favoriteItem.copy(id = "C", exposureCount = 5, viewCount = 0, rating = 5f)
-        val itemD = favoriteItem.copy(id = "D", exposureCount = 5, viewCount = 2, rating = 5f)
+        val favorite = favoriteItem.copy(id = "fav_true", isFavorite = true, rating = 0f)
+        val highRated = unseenItem.copy(id = "rated_5", isFavorite = false, rating = 5f)
+        val ordinary = unseenItem.copy(id = "normal", isFavorite = false, rating = 0f)
         
         val results = repo.getFilteredAndSortedMedia(
             filterType = "ALL",
             sortCategory = SortCategory.INTELLIGENT,
             standardSort = StandardSortOption.NEWEST_FIRST,
-            intelligentSort = IntelligentSortOption.LEAST_INTERACTED,
-            inputItems = listOf(itemD, itemC, itemB, itemA)
+            intelligentSort = IntelligentSortOption.FAVORITES,
+            inputItems = listOf(favorite, highRated, ordinary)
         )
         
-        assertEquals("A", results[0].id) // Priority 1: Lowest exposure (0)
-        assertEquals("B", results[1].id) // Priority 2: Unrated (0f) among exposure=5
-        assertEquals("C", results[2].id) // Priority 3: Lowest engagement (0 views) among rated items with exposure=5
-        assertEquals("D", results[3].id) // Priority 3: Higher engagement (2 views)
+        assertEquals(2, results.size)
+        val ids = results.map { it.id }
+        assertTrue(ids.contains("fav_true"))
+        assertTrue(ids.contains("rated_5"))
+    }
+
+    @Test
+    fun testLibrary_HiddenGemsSort_FocusesOnLowExposure() {
+        val repo = MediaRepository()
+        val gem = unseenItem.copy(id = "gem", exposureCount = 1, viewCount = 0, rating = 0f)
+        val exposed = favoriteItem.copy(id = "exposed", exposureCount = 10, viewCount = 5, rating = 5f)
+        
+        val results = repo.getFilteredAndSortedMedia(
+            filterType = "ALL",
+            sortCategory = SortCategory.INTELLIGENT,
+            standardSort = StandardSortOption.NEWEST_FIRST,
+            intelligentSort = IntelligentSortOption.HIDDEN_GEMS,
+            inputItems = listOf(gem, exposed)
+        )
+        
+        assertEquals(1, results.size)
+        assertEquals("gem", results[0].id)
+    }
+
+    @Test
+    fun testLibrary_SurpriseMe_UsesStableSeed() {
+        val repo = MediaRepository()
+        val items = (1..20).map { unseenItem.copy(id = "item_$it") }
+        
+        val results1 = repo.getFilteredAndSortedMedia(
+            filterType = "ALL",
+            sortCategory = SortCategory.INTELLIGENT,
+            standardSort = StandardSortOption.NEWEST_FIRST,
+            intelligentSort = IntelligentSortOption.SURPRISE_ME,
+            inputItems = items,
+            sessionSeed = 123L
+        )
+
+        val results2 = repo.getFilteredAndSortedMedia(
+            filterType = "ALL",
+            sortCategory = SortCategory.INTELLIGENT,
+            standardSort = StandardSortOption.NEWEST_FIRST,
+            intelligentSort = IntelligentSortOption.SURPRISE_ME,
+            inputItems = items,
+            sessionSeed = 123L
+        )
+
+        val results3 = repo.getFilteredAndSortedMedia(
+            filterType = "ALL",
+            sortCategory = SortCategory.INTELLIGENT,
+            standardSort = StandardSortOption.NEWEST_FIRST,
+            intelligentSort = IntelligentSortOption.SURPRISE_ME,
+            inputItems = items,
+            sessionSeed = 456L
+        )
+
+        assertEquals("Same seed must produce same order", results1.map { it.id }, results2.map { it.id })
+        assertNotEquals("Different seed must produce different order", results1.map { it.id }, results3.map { it.id })
     }
 }

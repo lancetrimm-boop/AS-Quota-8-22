@@ -66,10 +66,11 @@ class OnnxRuntimeMiniLMInferenceEngine(
                 session = env.createSession(modelPath)
                 Log.i("MiniLMInference", "ONNX Session initialized from path: $modelPath")
             } else {
-                Log.e("MiniLMInference", "No model artifact provided to OnnxRuntimeMiniLMInferenceEngine.")
+                throw IllegalArgumentException("No model artifact provided to OnnxRuntimeMiniLMInferenceEngine.")
             }
         } catch (e: Exception) {
             Log.e("MiniLMInference", "Failed to initialize ONNX session", e)
+            throw e // Rethrow to trigger fallback in MediaRepository
         }
     }
 
