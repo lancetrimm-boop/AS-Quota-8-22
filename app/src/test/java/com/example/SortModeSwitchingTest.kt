@@ -28,39 +28,83 @@ class SortModeSwitchingTest {
     }
 
     @Test
-    fun testSwitchingModesEmitsNewStateEvenIfItemsIdentical() = runTest(testDispatcher) {
-        val item1 = MediaItem(id = "1", title = "Item 1", mediaType = "PHOTO", compatibilityStatus = CompatibilityStatus.PLAYABLE)
-        repository.setMediaItemsForTesting(listOf(item1))
+    fun testSwitchingFromSurpriseToTitleAscClearsLabelsAndChangesOrder() = runTest(testDispatcher) {
+        val itemA = MediaItem(id = "a", title = "B-Item", mediaType = "PHOTO", compatibilityStatus = CompatibilityStatus.PLAYABLE)
+        val itemB = MediaItem(id = "b", title = "A-Item", mediaType = "PHOTO", compatibilityStatus = CompatibilityStatus.PLAYABLE)
+        repository.setMediaItemsForTesting(listOf(itemA, itemB))
 
-        // Collect the flow to ensure it's active and recording emissions
-        val results = mutableListOf<List<LibraryItemUi>>()
-        val job = launch {
-            repository.latestAiSortRecommendation.collect {
-                results.add(it)
-            }
-        }
-
-        // 1. Initial Mode: Personalized
+        // 1. Set to Surprise Me
         repository.sortCategory = SortCategory.INTELLIGENT
-        repository.intelligentSort = IntelligentSortOption.PERSONALIZED
-        advanceUntilIdle()
-        
-        val firstResults = results.lastOrNull() ?: repository.latestAiSortRecommendation.value
-        assertEquals(1, firstResults.size)
-        assertEquals("1", firstResults[0].id)
-
-        // 2. Switch to Surprise Me
-        // Even though results contain the same item, the emission should happen
-        // because we updated the mode-aware identity in the Flow pipeline.
         repository.intelligentSort = IntelligentSortOption.SURPRISE_ME
         advanceUntilIdle()
+        
+        val surpriseResults = repository.latestAiSortRecommendation.value
+        assertTrue(surpriseResults.any { it.selectionReason == "SURPRISE!" })
 
-        val secondResults = results.lastOrNull() ?: repository.latestAiSortRecommendation.value
-        assertEquals(1, secondResults.size)
-        // Note: In our implementation, selectionReason should be different
-        assertNotEquals("Reasons should differ between modes", 
-            firstResults[0].selectionReason, secondResults[0].selectionReason)
-            
-        job.cancel()
+        // 2. Switch to Standard Title A-Z
+        repository.sortCategory = SortCategory.STANDARD
+        repository.standardSort = StandardSortOption.TITLE_ASC
+        advanceUntilIdle()
+
+        val standardResults = repository.latestAiSortRecommendation.value
+        assertEquals("A-Item", standardResults[0].title)
+        assertEquals("B-Item", standardResults[1].title)
+        assertNull("Labels should be cleared in standard sort", standardResults[0].selectionReason)
+        assertNull("Labels should be cleared in standard sort", standardResults[1].selectionReason)
+    }
+
+    @Test
+    fun testSystemStatusPreservedInStandardSort() = runTest(testDispatcher) {
+        val item1 = MediaItem(
+            id = "1", 
+            title = "Failed Item", 
+            mediaType = "PHOTO", 
+            compatibilityStatus = CompatibilityStatus.ANALYSIS_FAILED // This triggers "Retry Analysis" reason
+        )
+        repository.setMediaItemsForTesting(listOf(item1))
+
+        repository.sortCategory = SortCategory.STANDARD
+        repository.standardSort = StandardSortOption.NEWEST_FIRST
+        advanceUntilIdle()
+
+        val results = repository.latestAiSortRecommendation.value
+        assertEquals("RETRY ANALYSIS", results[0].selectionReason?.uppercase())
+    }
+
+    @Test
+    fun testFavoriteWhileSurpriseDoesNotPersistSurpriseLabel() = runTest(testDispatcher) {
+        val item = MediaItem(
+            id = "1", 
+            title = "Item 1", 
+            mediaType = "PHOTO", 
+            compatibilityStatus = CompatibilityStatus.PLAYABLE,
+            selectionReason = "Surprise!"
+        )
+        
+        // Use reflection to call the private toEntity() method
+        val toEntityMethod = MediaRepository::class.java.getDeclaredMethod("toEntity", MediaItem::class.java)
+        toEntityMethod.isAccessible = true
+        
+        val entity = toEntityMethod.invoke(repository, item) as com.example.data.db.MediaEntity
+        
+        assertNull("Surprise! label should be stripped before persistence", entity.selectionReason)
+    }
+
+    @Test
+    fun testSystemStatusPreservedInPersistence() = runTest(testDispatcher) {
+        val item = MediaItem(
+            id = "1", 
+            title = "Item 1", 
+            mediaType = "PHOTO", 
+            compatibilityStatus = CompatibilityStatus.ANALYSIS_FAILED,
+            selectionReason = "Retry Analysis"
+        )
+        
+        val toEntityMethod = MediaRepository::class.java.getDeclaredMethod("toEntity", MediaItem::class.java)
+        toEntityMethod.isAccessible = true
+        
+        val entity = toEntityMethod.invoke(repository, item) as com.example.data.db.MediaEntity
+        
+        assertEquals("Retry Analysis", entity.selectionReason)
     }
 }

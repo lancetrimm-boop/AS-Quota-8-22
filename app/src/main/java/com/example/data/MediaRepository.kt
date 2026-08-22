@@ -406,6 +406,11 @@ class MediaRepository(
         get() = _libraryFilter.value
         set(value) { _libraryFilter.value = value }
 
+    fun refreshSort() {
+        _librarySessionSeed.value = System.currentTimeMillis()
+        Log.d("AURA_SORT_DIAG", "refreshSort called. New seed: ${_librarySessionSeed.value}")
+    }
+
     private val _activeSortCategory = MutableStateFlow(SortCategory.STANDARD)
     val activeSortCategory: StateFlow<SortCategory> = _activeSortCategory.asStateFlow()
     var sortCategory: SortCategory
@@ -423,7 +428,7 @@ class MediaRepository(
         get() = _selectedStandardSort.value
         set(value) {
             if (value == StandardSortOption.RANDOM) {
-                _librarySessionSeed.value = System.currentTimeMillis()
+                refreshSort()
             }
             _selectedStandardSort.value = value
             scope.launch {
@@ -436,6 +441,9 @@ class MediaRepository(
     var intelligentSort: IntelligentSortOption
         get() = _selectedIntelligentSort.value
         set(value) { 
+            if (value == IntelligentSortOption.SURPRISE_ME) {
+                refreshSort()
+            }
             _selectedIntelligentSort.value = value 
             scope.launch {
                 database?.userPreferenceDao()?.insertPreference(com.example.data.db.UserPreferenceEntity("selected_intelligent_sort", value.name))
@@ -636,7 +644,7 @@ class MediaRepository(
         }
     }
     .flowOn(kotlinx.coroutines.Dispatchers.Default)
-    .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+    .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /**
      * LATEST AVAILABLE AI SORT RECOMMENDATION (Reactive UI Model)
@@ -3555,7 +3563,7 @@ stats ->
         }
 
         return if (sortCategory == SortCategory.STANDARD) {
-            when (standardSort) {
+            val sorted = when (standardSort) {
                 StandardSortOption.NEWEST_FIRST -> items.sortedByDescending { it.dateAdded }
                 StandardSortOption.RECENTLY_PLAYED -> items.sortedWith(compareByDescending(nullsFirst()) { it.lastViewedTimestamp })
                 StandardSortOption.TITLE_ASC -> items.sortedBy { it.title.lowercase() }
@@ -3565,15 +3573,15 @@ stats ->
                 StandardSortOption.MOST_PLAYED -> items.sortedByDescending { it.viewCount }
                 StandardSortOption.LEAST_PLAYED -> items.sortedBy { it.viewCount }
                 StandardSortOption.RANDOM -> {
-                    // AURA P1 STABILITY: Deterministic normalization before shuffle
-                    // ensures resulting order is independent of physical database input sequence.
-                    // FIXED: Use hash-based sorting for true stability as new items arrive.
-                    // This ensures that existing items maintain their relative order,
-                    // and new items are inserted at deterministic positions.
                     items.sortedBy { item ->
                         (item.id + sessionSeed).hashCode()
                     }
                 }
+            }
+            // AURA LABEL FIX: Standard sort results must not display stale ephemeral AI labels.
+            // Systems labels like "Retry Analysis" are preserved.
+            sorted.map { item ->
+                if (isEphemeralReason(item.selectionReason)) item.copy(selectionReason = null) else item
             }
         } else {
             // INTELLIGENT SORTING
@@ -3684,7 +3692,22 @@ stats ->
         }
     }
 
+    private val EPHEMERAL_AI_REASONS = setOf(
+        "Surprise!", "For You", "Hidden Gem", "Best Match", 
+        "Personalized", "New Discovery", "Blast from the Past", "Your Favorite"
+    )
+    private val MATCH_PERCENT_REGEX = Regex("""\d+% Match""")
+
+    private fun isEphemeralReason(reason: String?): Boolean {
+        if (reason == null) return false
+        return reason in EPHEMERAL_AI_REASONS || MATCH_PERCENT_REGEX.matches(reason)
+    }
+
     private fun MediaItem.toEntity(): MediaEntity {
+        // AURA PERSISTENCE FIX: Never persist ephemeral AI recommendation reasons to the DB.
+        // This prevents AI labels from "sticking" to items during Favorite/Like updates.
+        val persistentReason = if (isEphemeralReason(selectionReason)) null else selectionReason
+        
         return MediaEntity(
             id = id,
             title = title,
@@ -3725,7 +3748,7 @@ stats ->
             conversionStatus = conversionStatus.name,
             convertedUri = convertedUri ?: "",
             lastCompatibilityCheckTimestamp = lastCompatibilityCheckTimestamp,
-            selectionReason = selectionReason,
+            selectionReason = persistentReason,
             creatorId = creatorId,
             creatorName = creatorName,
             sourcePlatform = sourcePlatform,

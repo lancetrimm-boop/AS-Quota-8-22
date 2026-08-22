@@ -274,12 +274,7 @@ fun LibraryScreen(
             PullToRefreshBox(
                 isRefreshing = false,
                 onRefresh = { 
-                    // Refresh the sort (triggers session seed refresh for Random)
-                    if (activeCategory == SortCategory.STANDARD) {
-                        repository.standardSort = standardSort
-                    } else {
-                        repository.intelligentSort = intelligentSort
-                    }
+                    repository.refreshSort()
 
                     if (dbState == com.example.data.DatabaseState.READY) {
                         scanPermissionLauncher.launch(permissionsToRequest)
@@ -565,7 +560,7 @@ private fun CompactControlsRow(
                     StandardSortOption.RANDOM -> "Shuffle"
                     StandardSortOption.LEAST_PLAYED -> "Unplayed"
                 },
-                isSelected = false,
+                isSelected = (activeCategory == SortCategory.STANDARD),
                 options = StandardSortOption.entries,
                 onOptionSelected = onStandardSortChange,
                 onPillClick = { /* Toggle menu */ },
@@ -582,7 +577,7 @@ private fun CompactControlsRow(
                     IntelligentSortOption.FAVORITES -> "Favorites"
                     IntelligentSortOption.SURPRISE_ME -> "Surprise Me"
                 },
-                isSelected = false,
+                isSelected = (activeCategory == SortCategory.INTELLIGENT),
                 options = IntelligentSortOption.entries,
                 onOptionSelected = onIntelligentSortChange,
                 onPillClick = { /* Toggle menu */ },
