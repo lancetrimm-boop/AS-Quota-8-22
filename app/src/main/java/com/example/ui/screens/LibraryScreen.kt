@@ -178,6 +178,7 @@ fun LibraryScreen(
                 SearchHeader(
                     searchQuery = searchQuery,
                     onQueryChange = { 
+                        android.util.Log.d("AURA_UI_TRACE", "Search query changing to: '$it'")
                         searchQuery = it
                         repository.librarySearchQuery = it
                     },

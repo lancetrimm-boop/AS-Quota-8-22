@@ -459,7 +459,10 @@ class MediaRepository(
     private val _librarySearchQuery = MutableStateFlow("")
     var librarySearchQuery: String
         get() = _librarySearchQuery.value
-        set(value) { _librarySearchQuery.value = value }
+        set(value) { 
+            android.util.Log.d("AURA_SEARCH_DEBUG", "librarySearchQuery set to: '$value'")
+            _librarySearchQuery.value = value 
+        }
 
     @OptIn(kotlinx.coroutines.FlowPreview::class)
     private val librarySearchQueryFlow: Flow<String> = _librarySearchQuery.debounce(300).distinctUntilChanged()
@@ -560,89 +563,70 @@ class MediaRepository(
     /**
      * INTERNAL PRE-SORTED LIST OF FULL MEDIA ITEMS
      * Used for playlist generation to avoid passing heavy entities to the UI layer.
+     * AURA RESTORATION: Reverted to synchronous combine-based pipeline from Official.
      */
-    @OptIn(kotlinx.coroutines.FlowPreview::class, kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
     private val latestSortedFullItemsFlow: StateFlow<List<MediaItem>> = combine(
         mediaItems, _tasteDNA, _preferenceProfile, _libraryFilter, 
         _activeSortCategory, _selectedStandardSort, _selectedIntelligentSort,
         librarySearchQueryFlow, _librarySessionSeed, _discoveryPolicy, 
         _userIntent, _intelligenceStats, _creatorProfiles
-    ) { args -> args }
-    .flatMapLatest { args ->
-        flow {
-            @Suppress("UNCHECKED_CAST")
-            val items = args[0] as List<MediaItem>
-            val dna = args[1] as TasteDNA
-            val profile = args[2] as TasteDNA.PreferenceProfile
-            val filter = args[3] as String
-            val category = args[4] as SortCategory
-            val standardSort = args[5] as StandardSortOption
-            val intelligentSort = args[6] as IntelligentSortOption
-            val query = args[7] as String
-            val seed = args[8] as Long
-            val policy = args[9] as DiscoveryPolicy
-            val intent = args[10] as UserIntent
-            val stats = args[11] as IntelligenceStats
-            @Suppress("UNCHECKED_CAST")
-            val creators = args[12] as Map<String, CreatorProfile>
+    ) { args ->
+        @Suppress("UNCHECKED_CAST")
+        val items = args[0] as List<MediaItem>
+        val dna = args[1] as TasteDNA
+        val profile = args[2] as TasteDNA.PreferenceProfile
+        val filter = args[3] as String
+        val category = args[4] as SortCategory
+        val standardSort = args[5] as StandardSortOption
+        val intelligentSort = args[6] as IntelligentSortOption
+        val query = args[7] as String
+        val seed = args[8] as Long
+        val policy = args[9] as DiscoveryPolicy
+        val intent = args[10] as UserIntent
+        val stats = args[11] as IntelligenceStats
+        @Suppress("UNCHECKED_CAST")
+        val creators = args[12] as Map<String, CreatorProfile>
 
-            android.util.Log.d("AURA_SORT_FLOW", "latestSortedFullItemsFlow recomputing. Query: '$query', Category: $category, Sort: ${if(category == SortCategory.STANDARD) standardSort else intelligentSort}")
+        android.util.Log.d("AURA_SORT_FLOW", "Pipeline recomputing. Category: $category, IntSort: $intelligentSort, StdSort: $standardSort, Pool: ${items.size}")
 
-            android.util.Log.d("AURA_DATA_FLOW", "Recomputing latestSortedFullItemsFlow. Query: '$query', Category: $category, Sort: ${if(category == SortCategory.STANDARD) standardSort else intelligentSort}")
-
-            val sorted = getFilteredAndSortedMedia(
-                filterType = filter,
-                sortCategory = category,
-                standardSort = standardSort,
-                intelligentSort = intelligentSort,
-                sessionSeed = seed,
-                inputItems = items,
-                tasteDNA = dna,
-                profile = profile,
-                policy = policy,
-                intent = intent,
-                stats = stats,
-                creatorProfiles = creators
-            )
-            
-            if (query.isBlank()) {
-                android.util.Log.d("AURA_DATA_FLOW", "Emission: Sorted list of ${sorted.size} items.")
-                emit(sorted)
-            } else {
-                val basePool = items.filter { item ->
-                    matchesFilterType(item, filter) && isItemVisibleInLibrary(item)
-                }
-                android.util.Log.d("AURA_SEARCH_FLOW", "Searching. Query: '$query', Pool size: ${basePool.size}")
-
-                val engine = hybridSearchEngine
-                if (engine != null) {
-                    val result = engine.search(query)
-                    val hybridResults = if (result.isSuccess && result.candidates.isNotEmpty()) {
-                        val itemsMap = items.associateBy { it.id }
-                        result.candidates.mapNotNull { itemsMap[it.mediaId] }
-                    } else {
-                        performLegacySearch(basePool, query)
-                    }
-                    
-                    val eligibleIds = basePool.map { it.id }.toSet()
-                    val finalResults = hybridResults.filter { it.id in eligibleIds }
-                    android.util.Log.d("AURA_SEARCH_FLOW", "Search result count: ${finalResults.size}")
-                    emit(finalResults)
-                } else {
-                    val legacy = performLegacySearch(basePool, query)
-                    android.util.Log.d("AURA_SEARCH_FLOW", "Legacy search result count: ${legacy.size}")
-                    emit(legacy)
-                }
+        val sorted = getFilteredAndSortedMedia(
+            filterType = filter,
+            sortCategory = category,
+            standardSort = standardSort,
+            intelligentSort = intelligentSort,
+            sessionSeed = seed,
+            inputItems = items,
+            tasteDNA = dna,
+            profile = profile,
+            policy = policy,
+            intent = intent,
+            stats = stats,
+            creatorProfiles = creators
+        )
+        
+        if (query.isBlank()) {
+            android.util.Log.d("AURA_SORT_FLOW", "Emission: Sorted list of ${sorted.size} items.")
+            sorted
+        } else {
+            val q = query.trim().lowercase()
+            val results = sorted.filter { item ->
+                item.title.lowercase().contains(q) ||
+                item.genre.lowercase().contains(q) ||
+                item.moodTags.any { it.lowercase().contains(q) } ||
+                item.year.toString().contains(q)
             }
+            android.util.Log.d("AURA_SEARCH_FLOW", "Lexical search: Query=\"$q\", Pool=${sorted.size}, Found=${results.size}")
+            results
         }
     }
     .flowOn(kotlinx.coroutines.Dispatchers.Default)
-    .stateIn(scope, SharingStarted.Eagerly, emptyList())
+    .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /**
      * LATEST AVAILABLE AI SORT RECOMMENDATION (Reactive UI Model)
      * Optimized to emit lightweight UI models on a background thread.
-     * Mode-aware identity ensures UI refreshes even if top results are similar.
+     * AURA RESTORATION: Reinstated distinctUntilChanged and Official lifecycle.
      */
     val latestAiSortRecommendation: StateFlow<List<LibraryItemUi>> = latestSortedFullItemsFlow
         .map { items -> 
@@ -650,8 +634,9 @@ class MediaRepository(
             Log.d("AURA_UI_FLOW", "latestAiSortRecommendation emitting ${uiItems.size} items.")
             uiItems
         }
+        .distinctUntilChanged()
         .flowOn(kotlinx.coroutines.Dispatchers.Default)
-        .stateIn(scope, SharingStarted.Eagerly, emptyList())
+        .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private fun MediaItem.toLibraryItemUi(): LibraryItemUi {
         return LibraryItemUi(
