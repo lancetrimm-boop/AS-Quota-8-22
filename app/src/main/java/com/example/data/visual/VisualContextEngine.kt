@@ -180,7 +180,7 @@ class VisualContextEngine(
     /**
      * Samples up to 3 frames around the Like moment: T-1000ms, T, T+1000ms.
      */
-    private suspend fun extractSampledFrames(
+    internal suspend fun extractSampledFrames(
         mediaId: String,
         uri: String,
         playbackPositionMs: Long,
@@ -404,6 +404,68 @@ class VisualContextEngine(
                 isUserGenerated = false,
                 evidenceCategory = "Visual Context Like ($timeStr)"
             )
+        }
+    }
+
+    /**
+     * Specialized enrichment entry point for background processing.
+     * Extracts a representative frame and generates a visual embedding.
+     */
+    suspend fun enrichMedia(
+        mediaId: String,
+        uri: String,
+        durationMs: Long,
+        context: Context
+    ): Boolean = withContext(Dispatchers.IO) {
+        val provider = visualProvider ?: return@withContext false
+        val repo = semanticRepo ?: return@withContext false
+        
+        if (!provider.isReady()) return@withContext false
+
+        // Check if already has VISUAL embedding for current model
+        val descriptor = provider.descriptor
+        val mediaItem = repository.mediaItemsMap.value[mediaId]
+        // Content-aware hash for visual freshness
+        val currentHash = mediaItem?.contentHash ?: "v1_enrich_${mediaId}_${durationMs}"
+        
+        val existing = repo.getSpecificRepresentation(mediaId, descriptor.primaryType, descriptor)
+        if (existing != null && existing.sourceDataHash == currentHash) return@withContext true
+
+        Log.d(TAG, "Background visual enrichment started for: $mediaId")
+
+        try {
+            // For enrichment, sample one representative frame at 10% of duration (usually avoids intro/black frames)
+            val targetTimeMs = if (durationMs > 0) durationMs / 10 else 1000L
+            val bitmaps = extractSampledFrames(mediaId, uri, targetTimeMs, durationMs, context)
+            if (bitmaps.isEmpty()) {
+                Log.w(TAG, "Frame extraction failed for enrichment of $mediaId")
+                return@withContext false
+            }
+
+            val bitmap = bitmaps.first()
+            val result = provider.generateEmbedding(
+                mediaId = mediaId,
+                input = SemanticInput.ExplicitBitmap(bitmap),
+                sourceDataHash = currentHash
+            )
+
+            bitmaps.forEach { if (!it.isRecycled) it.recycle() }
+
+            return@withContext when (result) {
+                is EmbeddingResult.Success -> {
+                    repo.saveRepresentation(result.representation)
+                    candidateRetriever?.onRepresentationAdded(result.representation)
+                    Log.i(TAG, "Successfully enriched visual semantic for: $mediaId")
+                    true
+                }
+                is EmbeddingResult.Failure -> {
+                    Log.w(TAG, "Enrichment embedding failure for $mediaId: ${result.message}")
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Enrichment failed for $mediaId", e)
+            false
         }
     }
 }

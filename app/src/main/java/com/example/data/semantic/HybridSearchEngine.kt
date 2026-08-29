@@ -103,6 +103,7 @@ class DefaultHybridSearchEngine(
                 try {
                     lexicalRetriever.retrieveKeywordCandidates(trimmedQuery, topK = config.topK * 2)
                 } catch (e: Exception) {
+                    android.util.Log.e("AuraSemanticTrace", "Lexical search failed for query \"$trimmedQuery\"", e)
                     emptyList()
                 }
             }
@@ -116,6 +117,7 @@ class DefaultHybridSearchEngine(
                         targetType = SemanticRepresentationType.CONTENT
                     )
                 } catch (e: Exception) {
+                    android.util.Log.e("AuraSemanticTrace", "Semantic search failed for query \"$trimmedQuery\"", e)
                     null
                 }
             }
@@ -129,6 +131,7 @@ class DefaultHybridSearchEngine(
                             minSimilarity = config.minSemanticSimilarity
                         )
                     } catch (e: Exception) {
+                        android.util.Log.e("AuraSemanticTrace", "Visual search failed for query \"$trimmedQuery\"", e)
                         emptyList()
                     }
                 } else {
@@ -200,6 +203,8 @@ class DefaultHybridSearchEngine(
         val fusedCandidates = rrf.fuse(channelResults, config)
 
         val elapsed = System.currentTimeMillis() - startTime
+
+        android.util.Log.d("AuraSemanticTrace", "SEMANTIC_RESULTS requestId=hybrid_${System.currentTimeMillis()} query=\"$trimmedQuery\" resultCount=${fusedCandidates.size} latencyMs=$elapsed channelCounts=$channelCounts")
 
         HybridSearchResult(
             query = query,

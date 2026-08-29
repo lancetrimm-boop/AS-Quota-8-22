@@ -1309,6 +1309,7 @@ fun MediaDetailScreen(
                             label = "See Similar",
                             modifier = Modifier.weight(1f),
                             onClick = {
+                                Log.d("SeeSimilarTrace", "STAGE=UI sourceId=${activeItem.id} title=\"${activeItem.title}\" uri=${activeItem.uriPath}")
                                 onMicroMoment?.invoke(activeItem.id, 5)
                                 showPlayerMenu = false
                                 onSeeSimilar?.invoke(activeItem)

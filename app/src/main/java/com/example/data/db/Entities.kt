@@ -10,7 +10,8 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["isDeleted", "compatibilityStatus"]),
         Index(value = ["dateAdded"]),
-        Index(value = ["contentHash"])
+        Index(value = ["contentHash"]),
+        Index(value = ["enrichmentStatus"])
     ]
 )
 data class MediaEntity(
@@ -57,7 +58,10 @@ data class MediaEntity(
     val creatorId: String? = null,
     val creatorName: String? = null,
     val sourcePlatform: String? = "LOCAL",
-    val replacedByMediaId: String? = null
+    val replacedByMediaId: String? = null,
+    val enrichmentStatus: String = "PENDING",
+    val lastEnrichmentAttemptTimestamp: Long? = null,
+    val enrichmentFailureCount: Int = 0
 )
 
 @Entity(tableName = "pairwise_outcomes")

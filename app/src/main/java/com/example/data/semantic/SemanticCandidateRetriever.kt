@@ -53,6 +53,13 @@ class DefaultSemanticCandidateRetriever(
         val index = InMemoryVectorIndex(descriptor, type)
         index.rebuild(representations)
         indices[key] = index
+        
+        // Forensics: Aggregate loading statistics
+        val typeCount = representations.size
+        val distinctMedia = representations.map { it.mediaId }.distinct().size
+        
+        android.util.Log.i("AuraSemanticTrace", "INDEX_INIT type=$type model=${descriptor.modelId} dimensionality=${descriptor.dimensionality} persistedEmbeddings=$typeCount distinctMedia=$distinctMedia indexedVectors=${index.size}")
+        Unit
     }
 
     override suspend fun retrieveCandidates(
@@ -76,7 +83,14 @@ class DefaultSemanticCandidateRetriever(
 
     override fun onRepresentationAdded(representation: SemanticRepresentation) {
         val key = getIndexKey(representation.type, representation.modelDescriptor)
-        indices[key]?.add(representation)
+        val index = indices[key]
+        if (index != null) {
+            index.add(representation)
+        } else {
+            // Index not yet initialized - skip immediate update. 
+            // It will be populated from DB during lazy initialization.
+            android.util.Log.v("AuraSemanticTrace", "INDEX_INSERT_DEFERRED mediaId=${representation.mediaId} type=${representation.type}")
+        }
     }
 
     override fun onRepresentationRemoved(representationId: String) {

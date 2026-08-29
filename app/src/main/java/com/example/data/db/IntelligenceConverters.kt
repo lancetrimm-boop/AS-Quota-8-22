@@ -33,4 +33,14 @@ class IntelligenceConverters {
 
     @TypeConverter
     fun toActionStatus(value: String): IntelligenceActionStatus = IntelligenceActionStatus.valueOf(value)
+
+    @TypeConverter
+    fun fromEnrichmentStatus(value: EnrichmentStatus): String = value.name
+
+    @TypeConverter
+    fun toEnrichmentStatus(value: String): EnrichmentStatus = try {
+        EnrichmentStatus.valueOf(value)
+    } catch (_: Exception) {
+        EnrichmentStatus.PENDING
+    }
 }

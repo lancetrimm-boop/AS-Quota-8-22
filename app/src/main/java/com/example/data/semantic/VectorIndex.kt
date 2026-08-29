@@ -57,6 +57,7 @@ class InMemoryVectorIndex(
         validateCompatibility(representation)
         val normalized = VectorMath.l2Normalize(representation.vector)
         entries[representation.id] = IndexedItem(representation, normalized)
+        android.util.Log.d("AuraSemanticTrace", "INDEX_INSERT mediaId=${representation.mediaId} dimension=${representation.dimensionality} success=true")
     }
 
     override fun addAll(representations: List<SemanticRepresentation>) {
@@ -98,6 +99,10 @@ class InMemoryVectorIndex(
         descriptor.validateVectorDimensionality(queryVector)
 
         val normQuery = VectorMath.l2Normalize(queryVector)
+        
+        // FINGERPRINT: Deterministic hash of the first 8 elements of the query vector
+        val queryFingerprint = normQuery.take(8).joinToString(",") { String.format(java.util.Locale.US, "%.3f", it) }.hashCode()
+        android.util.Log.d("AuraSemanticTrace", "INDEX_QUERY queryDimension=${queryVector.size} indexSize=${entries.size} queryFingerprint=$queryFingerprint topK=$topK minSim=$minSimilarity")
 
         // Track best score per mediaId to prevent duplicate media candidate records
         val bestByMedia = mutableMapOf<String, SemanticRetrievalCandidate>()
@@ -123,13 +128,15 @@ class InMemoryVectorIndex(
             }
         }
 
-        // Deterministic sorting: Descending similarity score, then tie-break by mediaId ascending
-        return bestByMedia.values
+        val results = bestByMedia.values
             .sortedWith(
                 compareByDescending<SemanticRetrievalCandidate> { it.similarityScore }
                     .thenBy { it.mediaId }
             )
             .take(topK)
+            
+        android.util.Log.d("AuraSemanticTrace", "INDEX_QUERY_COMPLETE found=${results.size} topScore=${results.firstOrNull()?.similarityScore}")
+        return results
     }
 
     private fun validateCompatibility(representation: SemanticRepresentation) {

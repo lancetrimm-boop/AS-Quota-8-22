@@ -210,7 +210,7 @@ val MIGRATION_13_14 = object : Migration(13, 14) {
         ConversionJobEntity::class,
         SemanticRepresentationEntity::class
     ],
-    version = 38,
+    version = 39,
     exportSchema = false
 )
 @androidx.room.TypeConverters(IntelligenceConverters::class)
@@ -237,6 +237,16 @@ abstract class AuraDatabase : RoomDatabase() {
     companion object {
         @Volatile
         private var INSTANCE: AuraDatabase? = null
+
+        /**
+         * Clears the current database singleton.
+         * Used during reset/quarantine operations to ensure a fresh session.
+         */
+        fun clearInstance() {
+            synchronized(this) {
+                INSTANCE = null
+            }
+        }
 
         val MIGRATION_14_15 = object : Migration(14, 15) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -709,6 +719,15 @@ abstract class AuraDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_38_39 = object : Migration(38, 39) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `media_items` ADD COLUMN `enrichmentStatus` TEXT NOT NULL DEFAULT 'PENDING'")
+                db.execSQL("ALTER TABLE `media_items` ADD COLUMN `lastEnrichmentAttemptTimestamp` INTEGER")
+                db.execSQL("ALTER TABLE `media_items` ADD COLUMN `enrichmentFailureCount` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_media_items_enrichmentStatus` ON `media_items` (`enrichmentStatus`)")
+            }
+        }
+
 
         fun getInstance(context: Context): AuraDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -767,11 +786,15 @@ abstract class AuraDatabase : RoomDatabase() {
                         MIGRATION_34_35,
                         MIGRATION_35_36,
                         MIGRATION_36_37,
-                        MIGRATION_37_38
+                        MIGRATION_37_38,
+                        MIGRATION_38_39
                     )
                     .build()
                     INSTANCE = instance
                     instance
+                } catch (e: SecureStorageException) {
+                    android.util.Log.e("AuraDatabase", "TERMINAL ERROR: Secure storage failure", e)
+                    throw e // Re-throw to be handled by MediaRepository
                 } catch (e: Exception) {
                     android.util.Log.e("AuraDatabase", "TERMINAL ERROR: Secure initialization failed", e)
                     // Wrap encryption/transition failures to distinguish from standard SQL errors

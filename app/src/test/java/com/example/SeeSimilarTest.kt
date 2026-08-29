@@ -339,7 +339,7 @@ class SeeSimilarTest {
 
         val results = repository.getSimilarMedia(refItem)
 
-        assertTrue("Weak matches (score < 8) should be excluded", results.isEmpty())
+        assertTrue("Weak matches (score < 4) should be excluded", results.isEmpty())
     }
 
     @Test

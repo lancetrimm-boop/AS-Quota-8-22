@@ -179,6 +179,8 @@ class DefaultSemanticSearchService(
         val queryMediaId = "query_${UUID.randomUUID().toString().take(8)}"
         val input = SemanticInput.Text(trimmedQuery, targetType)
 
+        android.util.Log.d("AuraSemanticTrace", "SEMANTIC_QUERY_START requestId=$queryMediaId query=\"$trimmedQuery\" targetType=$targetType")
+
         val embeddingResult = embeddingProvider.generateEmbedding(
             mediaId = queryMediaId,
             input = input,
@@ -186,9 +188,14 @@ class DefaultSemanticSearchService(
         )
 
         val queryRepresentation = when (embeddingResult) {
-            is EmbeddingResult.Success -> embeddingResult.representation
+            is EmbeddingResult.Success -> {
+                val rep = embeddingResult.representation
+                android.util.Log.d("AuraSemanticTrace", "SEMANTIC_QUERY_EMBEDDING requestId=$queryMediaId success=true dimension=${rep.dimensionality} fingerprint=${rep.vector.take(5).joinToString(",")}")
+                rep
+            }
             is EmbeddingResult.Failure -> {
                 val elapsed = System.currentTimeMillis() - startTime
+                android.util.Log.e("AuraSemanticTrace", "SEMANTIC_QUERY_EMBEDDING requestId=$queryMediaId success=false error=\"${embeddingResult.message}\"")
                 return@withContext SemanticSearchResult(
                     query = query,
                     candidates = emptyList(),
@@ -213,6 +220,8 @@ class DefaultSemanticSearchService(
 
         val indexSize = candidateRetriever.getIndexSize(targetType, providerDescriptor)
         val elapsed = System.currentTimeMillis() - startTime
+
+        android.util.Log.d("AuraSemanticTrace", "SEMANTIC_VECTOR_SEARCH requestId=$queryMediaId indexSize=$indexSize candidateCount=${candidates.size} topScore=${candidates.firstOrNull()?.similarityScore}")
 
         SemanticSearchResult(
             query = query,

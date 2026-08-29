@@ -586,7 +586,9 @@ class MediaRepository(
             @Suppress("UNCHECKED_CAST")
             val creators = args[12] as Map<String, CreatorProfile>
 
-            Log.d("AURA_SORT_DIAG", "latestSortedFullItemsFlow triggered. Category: $category, IntelligentSort: $intelligentSort")
+            android.util.Log.d("AURA_SORT_FLOW", "latestSortedFullItemsFlow recomputing. Query: '$query', Category: $category, Sort: ${if(category == SortCategory.STANDARD) standardSort else intelligentSort}")
+
+            android.util.Log.d("AURA_DATA_FLOW", "Recomputing latestSortedFullItemsFlow. Query: '$query', Category: $category, Sort: ${if(category == SortCategory.STANDARD) standardSort else intelligentSort}")
 
             val sorted = getFilteredAndSortedMedia(
                 filterType = filter,
@@ -603,41 +605,32 @@ class MediaRepository(
                 creatorProfiles = creators
             )
             
-            Log.d("AURA_SEARCH_DEBUG", "Flow recomputing. Query: '$query', Items: ${items.size}, Category: $category, IntSort: $intelligentSort")
-
             if (query.isBlank()) {
-                Log.d("AURA_SEARCH_DEBUG", "Query blank, emitting sorted list of ${sorted.size} items")
+                android.util.Log.d("AURA_DATA_FLOW", "Emission: Sorted list of ${sorted.size} items.")
                 emit(sorted)
             } else {
-                // AURA SEARCH FIX: Search against the base pool of ALL eligible library items,
-                // ignoring Intelligent Sort focus filters (like "Unliked Only" in Personalized mode).
                 val basePool = items.filter { item ->
                     matchesFilterType(item, filter) && isItemVisibleInLibrary(item)
                 }
-                Log.d("AURA_SEARCH_DEBUG", "Searching. Base pool: ${basePool.size} items")
+                android.util.Log.d("AURA_SEARCH_FLOW", "Searching. Query: '$query', Pool size: ${basePool.size}")
 
                 val engine = hybridSearchEngine
                 if (engine != null) {
                     val result = engine.search(query)
-                    Log.d("AURA_SEARCH_DEBUG", "Hybrid result: success=${result.isSuccess}, candidates=${result.candidates.size}")
                     val hybridResults = if (result.isSuccess && result.candidates.isNotEmpty()) {
                         val itemsMap = items.associateBy { it.id }
                         result.candidates.mapNotNull { itemsMap[it.mediaId] }
                     } else {
-                        // Fallback to legacy search if hybrid engine fails OR returns zero matches
-                        val legacy = performLegacySearch(basePool, query)
-                        Log.d("AURA_SEARCH_DEBUG", "Hybrid failed or empty. Legacy results: ${legacy.size}")
-                        legacy
+                        performLegacySearch(basePool, query)
                     }
                     
-                    // AURA P1 STABILITY: Consistency filtering against the base pool
                     val eligibleIds = basePool.map { it.id }.toSet()
                     val finalResults = hybridResults.filter { it.id in eligibleIds }
-                    Log.d("AURA_SEARCH_DEBUG", "Emitting ${finalResults.size} search results")
+                    android.util.Log.d("AURA_SEARCH_FLOW", "Search result count: ${finalResults.size}")
                     emit(finalResults)
                 } else {
                     val legacy = performLegacySearch(basePool, query)
-                    Log.d("AURA_SEARCH_DEBUG", "Engine null. Legacy results: ${legacy.size}")
+                    android.util.Log.d("AURA_SEARCH_FLOW", "Legacy search result count: ${legacy.size}")
                     emit(legacy)
                 }
             }
@@ -651,14 +644,14 @@ class MediaRepository(
      * Optimized to emit lightweight UI models on a background thread.
      * Mode-aware identity ensures UI refreshes even if top results are similar.
      */
-    val latestAiSortRecommendation: StateFlow<List<LibraryItemUi>> = combine(
-        latestSortedFullItemsFlow,
-        _selectedIntelligentSort
-    ) { items, _ -> 
-        items.map { it.toLibraryItemUi() } 
-    }
-    .flowOn(kotlinx.coroutines.Dispatchers.Default)
-    .stateIn(scope, SharingStarted.Eagerly, emptyList())
+    val latestAiSortRecommendation: StateFlow<List<LibraryItemUi>> = latestSortedFullItemsFlow
+        .map { items -> 
+            val uiItems = items.map { it.toLibraryItemUi() }
+            Log.d("AURA_UI_FLOW", "latestAiSortRecommendation emitting ${uiItems.size} items.")
+            uiItems
+        }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+        .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     private fun MediaItem.toLibraryItemUi(): LibraryItemUi {
         return LibraryItemUi(
@@ -693,6 +686,25 @@ class MediaRepository(
     }
 
     private var initJob: Job? = null
+
+    fun resetDatabase(context: Context) {
+        scope.launch {
+            Log.w("AURA_RESET", "Quarantining database and starting fresh...")
+            _databaseState.value = DatabaseState.INITIALIZING
+            database?.close()
+            database = null
+            
+            val dbPath = context.getDatabasePath("aura_intelligence.db")
+            if (dbPath.exists()) {
+                val quarantinePath = context.getDatabasePath("aura_quarantine_${System.currentTimeMillis()}.db")
+                dbPath.renameTo(quarantinePath)
+                Log.i("AURA_RESET", "Database quarantined to: ${quarantinePath.name}")
+            }
+            
+            _mediaItems.value = emptyList()
+            initDatabase(context)
+        }
+    }
 
     fun initDatabase(context: Context) {
         applicationContext = context.applicationContext
@@ -3031,19 +3043,30 @@ class MediaRepository(
         }
     }
 
-    suspend fun getSimilarMedia(item: MediaItem): List<MediaItem> {
-        val all = _mediaItems.value.filter { it.id != item.id }
-        if (all.isEmpty()) return emptyList()
+    suspend fun getSimilarMedia(item: MediaItem, requestId: String = "NONE"): List<MediaItem> {
+        Log.d("SeeSimilarTrace", "STAGE=START requestId=$requestId sourceId=${item.id} title=\"${item.title}\"")
+        val allItems = _mediaItems.value
+        val all = allItems.filter { other ->
+            other.id != item.id && 
+            other.uriPath != item.uriPath && 
+            (item.contentHash == null || other.contentHash != item.contentHash) &&
+            isItemVisibleInLibrary(other)
+        }
+        
+        Log.d("SeeSimilarTrace", "STAGE=POOL_READY requestId=$requestId poolSize=${all.size}")
+        
+        if (all.isEmpty()) {
+            Log.w("SeeSimilarTrace", "No candidates available for similarity search.")
+            return emptyList()
+        }
 
-        // 1. Semantic Integration (Phase 13 Improvement)
-        // Retrieve embeddings for the reference item
+        // 1. Semantic Integration
         val repo = semanticRepresentationRepository
         val retriever = semanticCandidateRetriever
-        val semanticCandidates = mutableMapOf<String, Float>() // mediaId -> score
+        val semanticCandidates = mutableMapOf<String, Float>() 
         
         if (repo != null && retriever != null) {
             val reps = repo.getForMedia(item.id)
-            // Prioritize Visual context if available, fallback to Content
             val refRep = reps.find { it.type == com.example.data.semantic.SemanticRepresentationType.VISUAL }
                 ?: reps.find { it.type == com.example.data.semantic.SemanticRepresentationType.CONTENT }
                 
@@ -3053,9 +3076,12 @@ class MediaRepository(
                     type = refRep.type,
                     descriptor = refRep.modelDescriptor,
                     topK = 50,
-                    minSimilarity = 0.5f // Reasonable threshold for "similar"
+                    minSimilarity = 0.3f 
                 )
                 results.forEach { semanticCandidates[it.mediaId] = it.similarityScore }
+                Log.d("SeeSimilarTrace", "STAGE=SEMANTIC_QUERY_COMPLETE requestId=$requestId results=${results.size} modality=${refRep.type}")
+            } else {
+                Log.d("SeeSimilarTrace", "STAGE=SEMANTIC_QUERY_SKIP requestId=$requestId - No embeddings for source.")
             }
         }
 
@@ -3064,69 +3090,71 @@ class MediaRepository(
         val itemCategory = item.category.lowercase().trim()
         val isItemVideo = item.mediaType.equals("VIDEO", ignoreCase = true) || item.mediaType.equals("Movie", ignoreCase = true)
 
-        val stopWords = setOf("the", "and", "a", "an", "in", "on", "at", "for", "with", "of", "to", "is", "media", "video", "photo", "image", "you")
+        val stopWords = setOf("the", "and", "a", "an", "in", "on", "at", "for", "with", "of", "to", "is", "you")
         val itemTitleTokens = item.title.lowercase()
             .split(Regex("[^a-z0-9]+"))
-            .filter { it.length >= 3 && !stopWords.contains(it) }
+            .filter { it.length >= 2 && !stopWords.contains(it) }
             .toSet()
 
         val scored = all.mapNotNull { other ->
-            var contentScore = 0
+            var contentScore = 0f
 
-            // 1. Semantic Boost (+25 for high similarity)
+            // 1. Semantic Boost
             val semanticScore = semanticCandidates[other.id] ?: 0f
-            if (semanticScore > 0.8f) contentScore += 25
-            else if (semanticScore > 0.6f) contentScore += 15
+            if (semanticScore > 0.3f) {
+                contentScore += (semanticScore * 30f)
+            }
 
             // 2. Mood Tags matching (+12 per matching tag)
             val otherTags = other.moodTags.filter { it.isNotBlank() }.map { it.lowercase().trim() }.toSet()
             val commonTags = itemTags.intersect(otherTags).size
-            contentScore += commonTags * 12
+            contentScore += commonTags * 12f
 
-            // 3. Genre matching (+10 for matching genre, excluding generic "media")
+            // 3. Genre matching (+10 for matching genre)
             val otherGenre = other.genre.lowercase().trim()
-            if (itemGenre.isNotEmpty() && itemGenre != "media" && itemGenre == otherGenre) {
-                contentScore += 10
+            if (itemGenre.isNotEmpty() && itemGenre == otherGenre) {
+                contentScore += if (itemGenre != "media") 10f else 2f
             }
 
-            // 4. Category matching (+8 for matching category, excluding generic "for you")
+            // 4. Category matching (+8 for matching category)
             val otherCategory = other.category.lowercase().trim()
-            if (itemCategory.isNotEmpty() && itemCategory != "for you" && itemCategory == otherCategory) {
-                contentScore += 8
+            if (itemCategory.isNotEmpty() && itemCategory == otherCategory) {
+                contentScore += if (itemCategory != "for you") 8f else 2f
             }
 
-            // 5. Title / Filename token overlap (+6 per matching token)
+            // 5. Title token overlap (+15 per matching token)
             val otherTitleTokens = other.title.lowercase()
                 .split(Regex("[^a-z0-9]+"))
-                .filter { it.length >= 3 && !stopWords.contains(it) }
+                .filter { it.length >= 2 && !stopWords.contains(it) }
                 .toSet()
             val commonTitleTokens = itemTitleTokens.intersect(otherTitleTokens).size
-            contentScore += commonTitleTokens * 6
+            contentScore += commonTitleTokens * 15f
 
-            // Media type match bonus (+2 if there's any baseline content match)
+            // Media type match bonus
             val isOtherVideo = other.mediaType.equals("VIDEO", ignoreCase = true) || other.mediaType.equals("Movie", ignoreCase = true)
             val isSameType = (isOtherVideo == isItemVideo)
 
-            val totalScore = contentScore + (if (isSameType && contentScore > 0) 2 else 0)
+            val totalScore = contentScore + (if (isSameType && contentScore > 0) 2f else 0f)
 
-            // QUALITY THRESHOLD: We define "meaningful" as having a total similarity score of at least 8.
-            // This excludes very weak signals like a single title-token match across different media types.
-            if (totalScore >= 8) {
-                Pair(other, totalScore)
+            // Jitter for variety
+            val jitter = ((other.id.hashCode() xor item.id.hashCode()).toFloat() / Int.MAX_VALUE.toFloat()).let { if (it < 0) -it else it } * 0.1f
+            val finalScore = totalScore + jitter
+
+            if (finalScore >= 4f) {
+                Pair(other, finalScore)
             } else {
                 null
             }
         }
 
-        val sortedMatches = scored.sortedWith(
-            compareByDescending<Pair<MediaItem, Int>> { it.second }
-                .thenByDescending { it.first.dateAdded }
-                .thenBy { it.first.id }
-        ).map { it.first }
+        val sortedMatches = scored.sortedByDescending { it.second }.map { it.first }
 
-        // Bounded result: return top similarity matches (up to 30 candidates).
-        // QUALITY FIRST: Aim for the strongest matches. We allow up to 30 genuinely similar items, 
-        // but no longer provide arbitrary quantity-driven fallbacks.
+        Log.d("SeeSimilarTrace", "STAGE=SORT_COMPLETE requestId=$requestId results=${sortedMatches.size}")
+        sortedMatches.take(5).forEachIndexed { i, m -> 
+            val s = scored.find { it.first.id == m.id }?.second ?: 0f
+            Log.d("SeeSimilarTrace", "rank=${i+1} id=${m.id} score=$s title=\"${m.title}\"")
+        }
+
         return sortedMatches.take(30)
     }
 

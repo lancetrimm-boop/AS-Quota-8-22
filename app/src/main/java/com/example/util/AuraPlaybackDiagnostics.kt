@@ -37,6 +37,10 @@ object AuraPlaybackDiagnostics {
         val errorMessage = error.message
         val exceptionClass = error.javaClass.simpleName
         
+        val cause = error.cause
+        val causeClass = cause?.javaClass?.simpleName ?: "NONE"
+        val causeMsg = cause?.message ?: "NONE"
+        
         // Causal chain extraction
         val causeChain = extractCausalChain(error)
         val stackTrace = error.stackTraceToString()

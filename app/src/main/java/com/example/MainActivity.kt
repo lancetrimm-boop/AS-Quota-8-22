@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -90,12 +91,54 @@ fun AuraApp(repository: MediaRepository) {
             }
         }
         DatabaseState.TRANSITION_FAILED, DatabaseState.CORRUPTED, DatabaseState.ENCRYPTION_FAILED -> {
-            Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-                Text(
-                    text = "Database Error: ${databaseState.name}\nPlease restart the app or contact support.",
-                    color = AuraMidnight,
-                    fontWeight = FontWeight.Bold
+            var showResetDialog by remember { mutableStateOf(false) }
+            val context = LocalContext.current
+
+            if (showResetDialog) {
+                AlertDialog(
+                    onDismissRequest = { showResetDialog = false },
+                    title = { Text("Secure Database Unavailable", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Text("Aura cannot access the secure library because its encryption link is broken. No data has been deleted yet.\n\nResetting will quarantine the current library and start fresh. Old files will be preserved on this device for possible recovery.")
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showResetDialog = false
+                            repository.resetDatabase(context)
+                        }) {
+                            Text("Reset Library", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { 
+                            showResetDialog = false 
+                            (context as? Activity)?.finish()
+                        }) {
+                            Text("Exit App")
+                        }
+                    }
                 )
+            }
+
+            Box(modifier = Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Secure Initialization Failed",
+                        color = AuraMidnight,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(8.dp))
+                    Text(
+                        text = "Technical State: ${databaseState.name}",
+                        color = AuraMidnight.copy(alpha = 0.7f),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    androidx.compose.foundation.layout.Spacer(modifier = Modifier.padding(16.dp))
+                    TextButton(onClick = { showResetDialog = true }) {
+                        Text("View Recovery Options", color = AuraPurple)
+                    }
+                }
             }
         }
         DatabaseState.NOT_INITIALIZED -> {
@@ -384,12 +427,26 @@ fun AuraMainContent(repository: MediaRepository) {
                     },
                     onMicroMoment = { id, taps -> repository.recordMicroMoment(id, taps) },
                     onSeeSimilar = { targetItem ->
+                        val requestId = java.util.UUID.randomUUID().toString().take(6)
+                        Log.d("SeeSimilarTrace", "STAGE=ORCHESTRATOR requestId=$requestId sourceId=${targetItem.id} title=\"${targetItem.title}\"")
                         coroutineScope.launch {
-                            val similar = repository.getSimilarMedia(targetItem)
+                            val similar = repository.getSimilarMedia(targetItem, requestId)
+                            Log.d("SeeSimilarTrace", "STAGE=RESULT requestId=$requestId resultCount=${similar.size}")
+                            
                             if (similar.isNotEmpty()) {
                                 repository.setPlaylist(items = similar, initialIndex = 0, sourceTitle = "See Similar — ${targetItem.title}")
-                                android.widget.Toast.makeText(context, "Loaded ${similar.size} similar items", android.widget.Toast.LENGTH_SHORT).show()
+                                
+                                // Verification check: Did the playlist actually update?
+                                val active = repository.activePlaylist.value
+                                if (active != null && active.items.isNotEmpty()) {
+                                    Log.d("SeeSimilarTrace", "STAGE=SUCCESS requestId=$requestId playlistSize=${active.items.size}")
+                                    android.widget.Toast.makeText(context, "Loaded ${active.items.size} similar items", android.widget.Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Log.e("SeeSimilarTrace", "STAGE=PLAYLIST_FAILURE requestId=$requestId - Playlist became empty after sanitization.")
+                                    android.widget.Toast.makeText(context, "No playable similar items found", android.widget.Toast.LENGTH_LONG).show()
+                                }
                             } else {
+                                Log.d("SeeSimilarTrace", "STAGE=NO_RESULTS requestId=$requestId")
                                 android.widget.Toast.makeText(context, "No similar media found", android.widget.Toast.LENGTH_SHORT).show()
                             }
                         }

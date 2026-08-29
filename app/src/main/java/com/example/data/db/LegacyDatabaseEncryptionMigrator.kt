@@ -48,8 +48,17 @@ object LegacyDatabaseEncryptionMigrator {
         }
 
         if (isDatabaseEncrypted(dbPath)) {
-            Log.i(TAG, "Database is already encrypted. No transition required.")
-            return TransitionResult.AlreadyEncrypted
+            Log.i(TAG, "Database is already encrypted. Validating access...")
+            return try {
+                val hexKey = PassphraseManager.getPassphraseAsHex(context)
+                EncryptedSQLiteDatabase.openDatabase(dbPath.absolutePath, hexKey.toByteArray(), null, EncryptedSQLiteDatabase.OPEN_READONLY, null).use { 
+                    Log.i(TAG, "Encryption validation successful.")
+                }
+                TransitionResult.AlreadyEncrypted
+            } catch (t: Throwable) {
+                Log.e(TAG, "Encryption validation failed: ${t.message}")
+                TransitionResult.Failure("Existing database could not be opened with recovered key.", t)
+            }
         }
 
         Log.i(TAG, "Plaintext legacy database detected. Starting transition...")

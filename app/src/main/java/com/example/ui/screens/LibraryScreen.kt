@@ -94,6 +94,13 @@ fun LibraryScreen(
     val mediaItemsMap by repository.mediaItemsMap.collectAsStateWithLifecycle()
     val dbState by repository.databaseState.collectAsStateWithLifecycle()
 
+    LaunchedEffect(latestSortedItems) {
+        android.util.Log.d("LIBRARY_UI_TRACE", "latestSortedItems updated. Count: ${latestSortedItems.size}")
+        if (latestSortedItems.isNotEmpty()) {
+            android.util.Log.d("LIBRARY_UI_TRACE", "Top items: ${latestSortedItems.take(3).joinToString { "[${it.id}] ${it.title}" }}")
+        }
+    }
+
     LaunchedEffect(searchQuery) {
         if (searchQuery.isNotBlank() && searchQuery.length >= 2) {
             delay(1500) // Only record if user stops typing for 1.5s
@@ -289,6 +296,7 @@ fun LibraryScreen(
                     )
                 } else {
                     // Infinite Scrolling Grid with adaptive columns for responsive landscape support
+                    android.util.Log.d("LIBRARY_UI_TRACE", "Rendering grid with ${latestSortedItems.size} items.")
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = 160.dp),
                         state = gridState,

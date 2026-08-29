@@ -29,6 +29,17 @@ enum class ConversionStatus {
     FAILED
 }
 
+enum class EnrichmentStatus {
+    PENDING,
+    PROCESSING,
+    COMPLETE,
+    TEXT_ONLY,
+    VISUAL_ONLY,
+    FAILED_RETRYABLE,
+    FAILED_PERMANENT,
+    NOT_REQUIRED
+}
+
 data class MediaItem(
     val id: String,
     val title: String,
@@ -73,7 +84,10 @@ data class MediaItem(
     val creatorId: String? = null,
     val creatorName: String? = null,
     val sourcePlatform: String? = "LOCAL", // e.g. "TIKTOK", "YOUTUBE", "INSTAGRAM", "PINTEREST"
-    val replacedByMediaId: String? = null
+    val replacedByMediaId: String? = null,
+    val enrichmentStatus: EnrichmentStatus = EnrichmentStatus.PENDING,
+    val lastEnrichmentAttemptTimestamp: Long? = null,
+    val enrichmentFailureCount: Int = 0
 )
 
 data class PairwiseComparison(

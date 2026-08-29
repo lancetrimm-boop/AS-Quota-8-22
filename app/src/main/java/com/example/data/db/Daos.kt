@@ -24,6 +24,31 @@ interface MediaDao {
     @Query("SELECT * FROM media_items WHERE compatibilityStatus = 'ANALYSIS_PENDING'")
     suspend fun getPendingAnalysis(): List<MediaEntity>
 
+    @Query("""
+        SELECT * FROM media_items 
+        WHERE isDeleted = 0 
+        AND compatibilityStatus NOT IN ('CORRUPT', 'UNSUPPORTED', 'DELETED')
+        AND enrichmentStatus IN ('PENDING', 'FAILED_RETRYABLE', 'TEXT_ONLY', 'VISUAL_ONLY')
+        ORDER BY lastEnrichmentAttemptTimestamp ASC, lastViewedTimestamp DESC, dateAdded DESC
+        LIMIT :limit
+    """)
+    suspend fun getNextEnrichmentBatch(limit: Int): List<MediaEntity>
+
+    @Query("UPDATE media_items SET enrichmentStatus = :status, lastEnrichmentAttemptTimestamp = :timestamp WHERE id = :id")
+    suspend fun updateEnrichmentStatus(id: String, status: String, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE media_items SET enrichmentStatus = :status, enrichmentFailureCount = enrichmentFailureCount + 1, lastEnrichmentAttemptTimestamp = :timestamp WHERE id = :id")
+    suspend fun recordEnrichmentFailure(id: String, status: String, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE media_items SET enrichmentStatus = 'PENDING' WHERE enrichmentStatus = 'PROCESSING'")
+    suspend fun recoverStuckEnrichment()
+
+    @Query("SELECT COUNT(*) FROM media_items WHERE isDeleted = 0 AND enrichmentStatus IN ('COMPLETE', 'TEXT_ONLY', 'VISUAL_ONLY')")
+    suspend fun getEnrichedCount(): Int
+
+    @Query("SELECT COUNT(*) FROM media_items WHERE isDeleted = 0 AND compatibilityStatus NOT IN ('CORRUPT', 'UNSUPPORTED', 'DELETED')")
+    suspend fun getEligibleEnrichmentCount(): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(items: List<MediaEntity>)
 
