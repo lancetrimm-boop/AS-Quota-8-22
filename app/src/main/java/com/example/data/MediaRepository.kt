@@ -624,14 +624,88 @@ class MediaRepository(
     .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /**
+     * ASYNCHRONOUS SEMANTIC SEARCH RESULTS
+     * Triggered independently of the main sort/filter pipeline to ensure baseline stability.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val semanticSearchResultsFlow: Flow<List<HybridCandidate>> = librarySearchQueryFlow
+        .flatMapLatest { query ->
+            if (query.isBlank()) {
+                kotlinx.coroutines.flow.flowOf(emptyList())
+            } else {
+                kotlinx.coroutines.flow.flow {
+                    val engine = hybridSearchEngine
+                    if (engine != null) {
+                        try {
+                            val result = engine.search(query)
+                            if (result.isSuccess) {
+                                android.util.Log.d("AURA_SEMANTIC_SEARCH", "Async search: Query=\"$query\", Candidates=${result.candidates.size}")
+                                emit(result.candidates)
+                            } else {
+                                emit(emptyList())
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("AURA_SEMANTIC_SEARCH", "Semantic engine failed for query: $query", e)
+                            emit(emptyList())
+                        }
+                    } else {
+                        emit(emptyList())
+                    }
+                }
+            }
+        }
+        .flowOn(kotlinx.coroutines.Dispatchers.Default)
+
+    /**
+     * MERGED FINAL LIBRARY COLLECTION
+     * Combines the synchronous lexical baseline with asynchronous semantic discoveries.
+     */
+    private val finalLibraryItemsFlow: StateFlow<List<MediaItem>> = combine(
+        latestSortedFullItemsFlow,
+        semanticSearchResultsFlow,
+        mediaItemsMap
+    ) { lexicalResults, semanticCandidates, itemsMap ->
+        android.util.Log.d("AURA_DATA_FLOW", "finalLibraryItemsFlow recomputing. Lexical=${lexicalResults.size} SemanticCandidates=${semanticCandidates.size}")
+        if (semanticCandidates.isEmpty()) return@combine lexicalResults
+
+        // 1. Identify items found by semantic search that are NOT in the lexical results
+        val lexicalIds = lexicalResults.map { it.id }.toSet()
+        
+        // 2. Map and filter semantic candidates
+        val semanticResults = semanticCandidates.mapNotNull { candidate ->
+            if (lexicalIds.contains(candidate.mediaId)) return@mapNotNull null
+            
+            val item = itemsMap[candidate.mediaId]
+            // Authoritative Visibility validation for semantic discoveries
+            if (item != null && isItemVisibleInLibrary(item)) {
+                // AURA P2: Continuous relevance labeling based on RRF rank
+                // Since RRF scores are normalized by K (default 60), we use a relative boost.
+                item.copy(selectionReason = "Semantic Match")
+            } else {
+                null
+            }
+        }
+
+        // 3. Construct the merged result set
+        // Lexical hits have authoritative priority, semantic discoveries are appended.
+        val finalResults = lexicalResults + semanticResults
+        
+        android.util.Log.d("AURA_SEMANTIC_SEARCH", "MERGE_RESULTS Lexical=${lexicalResults.size} Semantic=${semanticResults.size} Final=${finalResults.size}")
+        
+        finalResults
+    }
+    .flowOn(kotlinx.coroutines.Dispatchers.Default)
+    .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /**
      * LATEST AVAILABLE AI SORT RECOMMENDATION (Reactive UI Model)
      * Optimized to emit lightweight UI models on a background thread.
      * AURA RESTORATION: Reinstated distinctUntilChanged and Official lifecycle.
      */
-    val latestAiSortRecommendation: StateFlow<List<LibraryItemUi>> = latestSortedFullItemsFlow
+    val latestAiSortRecommendation: StateFlow<List<LibraryItemUi>> = finalLibraryItemsFlow
         .map { items -> 
             val uiItems = items.map { it.toLibraryItemUi() }
-            Log.d("AURA_UI_FLOW", "latestAiSortRecommendation emitting ${uiItems.size} items.")
+            android.util.Log.d("AURA_UI_FLOW", "latestAiSortRecommendation emitting ${uiItems.size} items.")
             uiItems
         }
         .distinctUntilChanged()
@@ -859,7 +933,7 @@ class MediaRepository(
                     checkNotNull(hybridSearchEngine) { "hybridSearchEngine failed to initialize" }
 
                     _databaseState.value = DatabaseState.READY
-                    
+
                     // AURA SEARCH FIX: Backfill semantics for existing media items
                     launch {
                         backfillSemantics()
